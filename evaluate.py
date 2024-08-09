@@ -173,7 +173,7 @@ def convert_and_evaluate(
     hf_output_dir = output_dir / "hf_ckpts"
 
     if not skip_conversion:
-        convert_checkpoints(output_dir, selected_checkpoints)
+        convert_checkpoints(hf_output_dir, selected_checkpoints)
 
     ### Evaluate the checkpoints
     evaluate_checkpoints(hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed)
