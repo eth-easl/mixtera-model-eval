@@ -1,0 +1,6 @@
+typer
+tqdm
+pyyaml
+lm_eval[vllm]
+
+# nanotron needs to be installed from source in the environment by the user
