@@ -93,6 +93,11 @@ def convert_and_evaluate(
         for idx, checkpoint in tqdm(selected_checkpoints.items(), desc="Converting Checkpoints"):
             tokenizer_name = get_tokenizer_name(checkpoint)
             save_path = hf_output_dir / f"{checkpoint.name}-hf"
+            parallelism_config = get_parallelism_config(checkpoint)
+            tp = parallelism_config.get("tp", 1)
+            pp = parallelism_config.get("pp", 1)
+
+            total_procs_for_conversion = tp * pp
 
             if save_path.exists():
                 typer.echo(f"Error: Directory {save_path} already exists - this is unexpected.")
@@ -100,7 +105,8 @@ def convert_and_evaluate(
 
             subprocess.run(
                 [
-                    "python",
+                    "torchrun",
+                    f"--nproc_per_node={total_procs_for_conversion}",
                     conversion_script_path,
                     "--checkpoint_path",
                     str(checkpoint),
