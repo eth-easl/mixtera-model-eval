@@ -138,7 +138,7 @@ def convert_and_evaluate(
             "--batch_size",
             "auto",
             "--output_path",
-            str(save_path / "results"),
+            str(output_dir / f"results_{checkpoint.name}"),
         ]
 
         subprocess.run(cmd, check=True)
