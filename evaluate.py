@@ -51,81 +51,57 @@ def check_output_dir(output_dir: Path):
             raise typer.Abort()
 
 
-@app.command()
-def convert_and_evaluate(
-    checkpoint_dir: Path,
-    output_dir: Path,
-    tasks: str = "lambada_openai,hellaswag",
-    data_parallel: int = 1,
-    skip_conversion: bool = False,
-    seed: int = 1337,
-):
-    check_nanotron_availability()
-    check_lm_eval_availability()
-    check_output_dir(output_dir)
-
-    checkpoints = list_checkpoints(checkpoint_dir)
-    checkpoint_dict = {i: cp for i, cp in enumerate(checkpoints)}
-
-    typer.echo("Available checkpoints:")
-    for idx, cp in checkpoint_dict.items():
-        typer.echo(f"{idx}: {cp.name}")
-
-    exclusions = []
-    while True:
-        exclude = typer.prompt("Enter checkpoint ID to exclude (or 'done' to finish)", default="done")
-        if exclude.lower() == "done":
-            break
-        if int(exclude) in checkpoint_dict:
-            exclusions.append(int(exclude))
-        else:
-            typer.echo(f"Unknown ID: {exclude}")
-
-    selected_checkpoints = {i: cp for i, cp in checkpoint_dict.items() if i not in exclusions}
-
-    hf_output_dir = output_dir / "hf_ckpts"
+def convert_checkpoints(hf_output_dir: Path, selected_checkpoints: dict[int, Path]):
     hf_output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not skip_conversion:
-        conversion_script_path = str(
-            Path(nanotron.__path__[0]).parent.parent / "examples" / "llama" / "convert_nanotron_to_hf.py"
+    conversion_script_path = str(
+        Path(nanotron.__path__[0]).parent.parent / "examples" / "llama" / "convert_nanotron_to_hf.py"
+    )
+    for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Converting Checkpoints"):
+        tokenizer_name = get_tokenizer_name(checkpoint)
+        save_path = hf_output_dir / f"{checkpoint.name}-hf"
+        parallelism_config = get_parallelism_config(checkpoint)
+        tp = parallelism_config.get("tp", 1)
+        pp = parallelism_config.get("pp", 1)
+
+        total_procs_for_conversion = tp * pp
+
+        if save_path.exists():
+            typer.echo(f"Error: Directory {save_path} already exists - this is unexpected.")
+            raise typer.Exit(code=1)
+
+        subprocess.run(
+            [
+                "torchrun",
+                f"--nproc_per_node={total_procs_for_conversion}",
+                conversion_script_path,
+                "--checkpoint_path",
+                str(checkpoint),
+                "--save_path",
+                str(save_path),
+                "--tokenizer_name",
+                tokenizer_name,
+            ],
+            check=True,
         )
-        for idx, checkpoint in tqdm(selected_checkpoints.items(), desc="Converting Checkpoints"):
-            tokenizer_name = get_tokenizer_name(checkpoint)
-            save_path = hf_output_dir / f"{checkpoint.name}-hf"
-            parallelism_config = get_parallelism_config(checkpoint)
-            tp = parallelism_config.get("tp", 1)
-            pp = parallelism_config.get("pp", 1)
 
-            total_procs_for_conversion = tp * pp
+        typer.echo(f"Converted {checkpoint.name} to Hugging Face format at {save_path}")
 
-            if save_path.exists():
-                typer.echo(f"Error: Directory {save_path} already exists - this is unexpected.")
-                raise typer.Exit(code=1)
 
-            subprocess.run(
-                [
-                    "torchrun",
-                    f"--nproc_per_node={total_procs_for_conversion}",
-                    conversion_script_path,
-                    "--checkpoint_path",
-                    str(checkpoint),
-                    "--save_path",
-                    str(save_path),
-                    "--tokenizer_name",
-                    tokenizer_name,
-                ],
-                check=True,
-            )
-
-            typer.echo(f"Converted {checkpoint.name} to Hugging Face format at {save_path}")
-
-    # Evaluate the model using lm-eval
-    for idx, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
+def evaluate_checkpoints(
+    hf_output_dir: Path,
+    output_dir: Path,
+    selected_checkpoints: dict[int, Path],
+    tasks: str,
+    data_parallel: int,
+    seed: int,
+):
+    for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
         if not save_path.exists():
             typer.echo(f"Expected model directory {save_path} does not exist. Skipping.")
             continue
+
         tokenizer_name = get_tokenizer_name(checkpoint)
         parallelism_config = get_parallelism_config(checkpoint)
         tp = parallelism_config.get("tp", 1)
@@ -150,6 +126,55 @@ def convert_and_evaluate(
         ]
 
         subprocess.run(cmd, check=True)
+
+
+@app.command()
+def convert_and_evaluate(
+    checkpoint_dir: Path,
+    output_dir: Path,
+    tasks: str = "lambada_openai,hellaswag",
+    data_parallel: int = 1,
+    skip_conversion: bool = False,
+    seed: int = 1337,
+    use_all_chkpnts: bool = False,
+):
+    check_nanotron_availability()
+    check_lm_eval_availability()
+    check_output_dir(output_dir)
+
+    ### Get all available checkpoints
+    checkpoints = list_checkpoints(checkpoint_dir)
+    checkpoint_dict = {i: cp for i, cp in enumerate(checkpoints)}
+
+    ### Decide which checkpoints to use
+    if not use_all_chkpnts:
+        # Ask user which checkpoints to exclude
+        typer.echo("Available checkpoints:")
+        for idx, cp in checkpoint_dict.items():
+            typer.echo(f"ID {idx}: {cp.name}")
+
+        exclusions = []
+        while True:
+            exclude = typer.prompt("Enter checkpoint ID to exclude (or 'done' to finish)", default="done")
+            if exclude.lower() == "done":
+                break
+            if int(exclude) in checkpoint_dict:
+                exclusions.append(int(exclude))
+            else:
+                typer.echo(f"Unknown ID: {exclude}")
+
+        selected_checkpoints = {i: cp for i, cp in checkpoint_dict.items() if i not in exclusions}
+    else:
+        # Use all checkpoints if flag is supplied instead of having user interaction
+        selected_checkpoints = {i: cp for i, cp in checkpoint_dict.items()}
+
+    hf_output_dir = output_dir / "hf_ckpts"
+
+    if not skip_conversion:
+        convert_checkpoints(output_dir, selected_checkpoints)
+
+    ### Evaluate the checkpoints
+    evaluate_checkpoints(hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed)
 
 
 if __name__ == "__main__":
