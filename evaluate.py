@@ -127,6 +127,8 @@ def evaluate_checkpoints(
 
         subprocess.run(cmd, check=True)
 
+    typer.echo("Successfully ran conversion and evaluation. Use `parse_results.py` to convert the data into a csv.")
+
 
 @app.command()
 def convert_and_evaluate(
