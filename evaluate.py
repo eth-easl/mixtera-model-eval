@@ -87,7 +87,9 @@ def convert_and_evaluate(
     hf_output_dir.mkdir(parents=True, exist_ok=True)
 
     if not skip_conversion:
-        conversion_script_path = str(Path(nanotron.__path__[0]) / "examples" / "llama" / "convert_nanotron_to_hf.py")
+        conversion_script_path = str(
+            Path(nanotron.__path__[0]).parent.parent / "examples" / "llama" / "convert_nanotron_to_hf.py"
+        )
         for idx, checkpoint in tqdm(selected_checkpoints.items(), desc="Converting Checkpoints"):
             tokenizer_name = get_tokenizer_name(checkpoint)
             save_path = hf_output_dir / f"{checkpoint.name}-hf"
