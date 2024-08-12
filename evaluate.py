@@ -95,6 +95,7 @@ def evaluate_checkpoints(
     tasks: str,
     data_parallel: int,
     seed: int,
+    num_fewshots: list[int],
 ):
     for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
@@ -111,21 +112,26 @@ def evaluate_checkpoints(
             typer.echo(f"Error: lm_eval currently only supports pp = 1 with VLLM, but pp = {pp}!")
             raise typer.Exit(code=1)
 
-        cmd = [
-            "lm_eval",
-            "--model",
-            "vllm",
-            "--model_args",
-            f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.9,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
-            "--tasks",
-            tasks,
-            "--batch_size",
-            "auto",
-            "--output_path",
-            str(output_dir / f"results_{checkpoint.name}"),
-        ]
-
-        subprocess.run(cmd, check=True)
+        for num_fewshot in num_fewshots:
+            typer.echo(f"Running with {num_fewshot} fewshot examples.")
+            fewshot_output_dir = output_dir / str(num_fewshot)
+            fewshot_output_dir.mkdir(exist_ok=True)
+            cmd = [
+                "lm_eval",
+                "--model",
+                "vllm",
+                "--model_args",
+                f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.9,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
+                "--tasks",
+                tasks,
+                "--num_fewshot",
+                str(num_fewshot),
+                "--batch_size",
+                "auto",
+                "--output_path",
+                str(fewshot_output_dir / f"results_{checkpoint.name}"),
+            ]
+            subprocess.run(cmd, check=True)
 
     typer.echo("Successfully ran conversion and evaluation. Use `parse_results.py` to convert the data into a csv.")
 
@@ -139,6 +145,7 @@ def convert_and_evaluate(
     skip_conversion: bool = False,
     seed: int = 1337,
     use_all_chkpnts: bool = False,
+    num_fewshots: list[int] = [0, 1, 5],
 ):
     check_nanotron_availability()
     check_lm_eval_availability()
@@ -176,7 +183,7 @@ def convert_and_evaluate(
         convert_checkpoints(hf_output_dir, selected_checkpoints)
 
     ### Evaluate the checkpoints
-    evaluate_checkpoints(hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed)
+    evaluate_checkpoints(hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed, num_fewshots)
 
 
 if __name__ == "__main__":

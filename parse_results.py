@@ -32,27 +32,32 @@ def parse_results(data):
 @app.command()
 def collect_and_export_results(output_dir: Path):
     output_dir = Path(output_dir)
-    result_dirs = [d for d in output_dir.glob("results_*") if d.is_dir()]
+    nshot_dirs = [d for d in output_dir.iterdir() if d.is_dir()]
 
-    all_results = []
-    schema_set = set()  # To track consistency of schema across all JSON files
+    for nshot_dir in nshot_dirs:
+        nshot = int(nshot_dir.name())
+        result_dirs = [d for d in nshot_dir.glob("results_*") if d.is_dir()]
 
-    for dir in result_dirs:
-        results = read_json_results(dir)
-        parsed_results = parse_results(results)
-        parsed_results["checkpoint_id"] = dir.name.split("_")[1]  # Extract checkpoint ID from directory name
-        all_results.append(parsed_results)
+        all_results = []
+        schema_set = set()  # To track consistency of schema across all JSON files
 
-        # Update schema_set to ensure all parsed results have the same schema
-        if not schema_set:
-            schema_set.update(parsed_results.keys())
-        elif schema_set != set(parsed_results.keys()):
-            raise ValueError("Inconsistent data schema across result JSON files.")
+        for dir in result_dirs:
+            results = read_json_results(dir)
+            parsed_results = parse_results(results)
+            parsed_results["checkpoint_id"] = dir.name.split("_")[1]  # Extract checkpoint ID from directory name
+            parsed_results["nshot"] = nshot
+            all_results.append(parsed_results)
+
+            # Update schema_set to ensure all parsed results have the same schema
+            if not schema_set:
+                schema_set.update(parsed_results.keys())
+            elif schema_set != set(parsed_results.keys()):
+                raise ValueError("Inconsistent data schema across result JSON files.")
 
     if all_results:
         df = pd.DataFrame(all_results)
         df.to_csv(output_dir / "results.csv", index=False)
-        typer.echo(f"Results have been successfully written to '{output_dir / 'results.csv'}'.")
+        typer.echo(f"Results have been successfully written to '{nshot_dir / 'results.csv'}'.")
     else:
         typer.echo("No results found.")
 
