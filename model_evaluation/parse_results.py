@@ -33,12 +33,13 @@ def parse_results(data):
 def collect_and_export_results(output_dir: Path):
     output_dir = Path(output_dir)
     nshot_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.isnumeric()]
+    all_results = []
 
     for nshot_dir in nshot_dirs:
         nshot = int(nshot_dir.name)
         result_dirs = [d for d in nshot_dir.glob("results_*") if d.is_dir()]
 
-        all_results = []
+        
         schema_set = set()  # To track consistency of schema across all JSON files
 
         for dir in result_dirs:
@@ -56,6 +57,9 @@ def collect_and_export_results(output_dir: Path):
 
     if all_results:
         df = pd.DataFrame(all_results)
+        column_order = ['checkpoint_id', 'nshot'] + [col for col in df.columns if col not in ['checkpoint_id', 'nshot']]
+        df = df[column_order]
+        df.sort_values(by=['checkpoint_id', 'nshot'], inplace=True)
         df.to_csv(output_dir / "results.csv", index=False)
         typer.echo(f"Results have been successfully written to '{output_dir / 'results.csv'}'.")
     else:
