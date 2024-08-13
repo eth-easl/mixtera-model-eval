@@ -57,7 +57,7 @@ def collect_and_export_results(output_dir: Path):
     if all_results:
         df = pd.DataFrame(all_results)
         df.to_csv(output_dir / "results.csv", index=False)
-        typer.echo(f"Results have been successfully written to '{nshot_dir / 'results.csv'}'.")
+        typer.echo(f"Results have been successfully written to '{output_dir / 'results.csv'}'.")
     else:
         typer.echo("No results found.")
 
