@@ -32,10 +32,10 @@ def parse_results(data):
 @app.command()
 def collect_and_export_results(output_dir: Path):
     output_dir = Path(output_dir)
-    nshot_dirs = [d for d in output_dir.iterdir() if d.is_dir()]
+    nshot_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.isnumeric()]
 
     for nshot_dir in nshot_dirs:
-        nshot = int(nshot_dir.name())
+        nshot = int(nshot_dir.name)
         result_dirs = [d for d in nshot_dir.glob("results_*") if d.is_dir()]
 
         all_results = []
