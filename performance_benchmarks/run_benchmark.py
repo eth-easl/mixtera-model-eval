@@ -57,7 +57,7 @@ class ModelType(str, Enum):
 # TODO: Find maximum microbatch size per GPU/model combination
 MACHINE_MODEL_MICROBATCH = {
     MachineType.sgsrtx: {
-        ModelType.tinyllama: 4,
+        ModelType.tinyllama: 1,  # tested > 1, goes OOM
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
     },
@@ -70,6 +70,24 @@ MACHINE_MODEL_MICROBATCH = {
         ModelType.tinyllama: -1,
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
+    },
+}
+
+MACHINE_MODEL_TOKENS = {
+    MachineType.sgsrtx: {
+        ModelType.tinyllama: 750000,
+        ModelType.llama7b: -1,
+        ModelType.llama70b: -1,
+    },
+    MachineType.sgsh100: {
+        ModelType.tinyllama: 2000000,
+        ModelType.llama7b: 2000000,
+        ModelType.llama70b: 2000000,
+    },
+    MachineType.cscs: {
+        ModelType.tinyllama: 2000000,
+        ModelType.llama7b: 2000000,
+        ModelType.llama70b: 2000000,
     },
 }
 
@@ -120,6 +138,19 @@ def get_data_from_wandb(project: str, run_id: str) -> dict:
 
     if not run:
         typer.echo(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
+        raise typer.Exit(code=1)
+
+    timeout = 300  # seconds
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        run.reload()  # Reload the run object to update its status
+        if run.state == "finished":
+            break
+        typer.echo("Still waiting for the run to finish on wandb.")
+        time.sleep(10)
+
+    if run.state != "finished":
+        typer.echo("Timeout reached. Run did not finish in 5 minutes.")
         raise typer.Exit(code=1)
 
     return run.history().to_json()
@@ -249,8 +280,7 @@ def adjust_base_config(
     config["data_stages"][0]["data"]["dataset"]["hf_dataset_or_datasets"] = str(dataset_path)
 
     # number of tokens that we want to consume (will be rounded up to match batch size/seq length)
-    # note after running some benchmarks we probably want to scale this based on the GPU type
-    total_tokens = 2000000 * dp
+    total_tokens = MACHINE_MODEL_TOKENS[mode][model] * dp
     batch_size = dp * config["tokens"]["batch_accumulation_per_replica"] * config["tokens"]["micro_batch_size"]
     tokens_per_step = batch_size * seq_length
     train_steps = math.ceil(total_tokens / tokens_per_step)
@@ -312,7 +342,7 @@ def run_benchmarks(
         typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
     for seed, dl_worker, dp, seq_len in tqdm(
-        itertools.product(seeds, dl_workers, dps, seq_lengths), desc="Processing configurations"
+        list(itertools.product(seeds, dl_workers, dps, seq_lengths)), desc="Processing configurations"
     ):
         adjusted_config, additional_info = adjust_base_config(
             base_config, dataset_path, bm_identifier, curr_run, mode, model, dl_worker, dp, seq_len, seed
