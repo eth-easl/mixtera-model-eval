@@ -270,6 +270,7 @@ def adjust_base_config(
 
     # set sequence length
     config["tokens"]["sequence_length"] = seq_length
+    config["model"]["model_config"]["max_position_embeddings"] = seq_length
 
     # set number of data loading workers
     assert len(config["data_stages"]) == 1, "data stages should only be 1"

@@ -45,6 +45,9 @@ def parse_results(json_path: Path, output_path: Path):
         batch_accumulation_per_replica = int(item["config"]["tokens"].get("batch_accumulation_per_replica", -1))
         micro_batch_size = int(item["config"]["tokens"].get("micro_batch_size", -1))
 
+        batch_size = int(item.get("batch_size", -1))
+        assert batch_size == item["global_batch_size"]["0"]
+
         tokens_per_second = [val for key, val in item["tokens_per_sec"].items() if key not in ["0", 0]]
         tokens_per_second_per_gpu = [val for key, val in item["tokens_per_sec_per_gpu"].items() if key not in ["0", 0]]
         elapsed_time_per_iteration_ms = [
@@ -71,6 +74,7 @@ def parse_results(json_path: Path, output_path: Path):
                 "train_steps": train_steps,
                 "batch_accumulation_per_replica": batch_accumulation_per_replica,
                 "micro_batch_size": micro_batch_size,
+                "batch_size": batch_size,
                 "final_consumed_tokens": final_consumed_tokens,
                 "final_runtime": final_runtime,
                 **{k + "_tokens_per_second": v for k, v in compute_stats(tokens_per_second).items()},
