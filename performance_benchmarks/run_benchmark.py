@@ -6,7 +6,6 @@ import subprocess
 import os
 import itertools
 import json
-import pandas as pd
 from copy import deepcopy
 import socket
 import wandb
@@ -273,18 +272,9 @@ def adjust_base_config(
     return config, additional_info
 
 
-def convert_subdicts_to_json(d):
-    for key, value in d.items():
-        if isinstance(value, dict):
-            d[key] = json.dumps(value)
-    return d
-
-
-def persist_results_to_csv(output: Path, all_results: list[dict]):
-    copied = deepcopy(all_results)
-    data = [convert_subdicts_to_json(item) for item in copied]
-    df = pd.DataFrame(data)
-    df.to_csv(output, index=False)
+def persist_results_to_json(output: Path, all_results: list[dict]):
+    with open(output, "w+") as fout:
+        json.dump(all_results, fout, indent=4)
 
 
 @app.command()
@@ -303,7 +293,12 @@ def run_benchmarks(
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
 
-    output_file = output_dir / f"{benchmark_name}.csv"
+    output_file = output_dir / f"{benchmark_name}.json"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if output_file.exists():
+        typer.echo(f"Error: file {output_file} already exists")
+
     base_config = load_base_config(model)
     all_results = []
     bm_identifier = f"mixterabench_{current_milli_time()}"
@@ -326,7 +321,7 @@ def run_benchmarks(
 
         all_results.append(base_results | run_benchmark(adjusted_config, mode))
 
-        persist_results_to_csv(output_file, all_results)
+        persist_results_to_json(output_file, all_results)
         curr_run += 1
 
 
