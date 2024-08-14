@@ -178,7 +178,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
     dp = int(config["parallelism"]["dp"])
     tp = int(config["parallelism"]["tp"])
     pp = int(config["parallelism"]["pp"])
-    nprocs = str(dp * tp * pp)
+    nprocs = str(dp * tp * pp)   
 
     command = [
         "python",
@@ -271,6 +271,11 @@ def adjust_base_config(
 
     # set number of dp nodes
     config["parallelism"]["dp"] = dp
+
+    # update tp nodes if necessary
+    if mode == MachineType.sgsrtx and model == ModelType.tinyllama:
+        config["parallelism"]["tp"] = 2
+
 
     # set microbatch size
     # TODO: We need to figure out whether batch_accumulation_per_replica matters. Can we always leave that at 1 for throughput benchmarks? For training, we don't want too small batches becaues that hurts convergence. However, for tput, in my understanding, increasing it to 2 will double the factual batch size, but keep the number of forward passes. So it should not affect throughput. Need to benchmark that though.
