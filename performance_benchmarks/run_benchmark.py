@@ -133,7 +133,8 @@ def load_yaml_from_file(path: str | Path):
 
 def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
     api = wandb.Api()
-    runs = api.runs(project)
+    # Retrieve all runs and sort them by creation date in descending order
+    runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
     run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if not run:

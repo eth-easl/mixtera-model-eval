@@ -24,7 +24,8 @@ def compute_stats(values):
 
 def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
     api = wandb.Api()
-    runs = api.runs(project)
+    # Retrieve all runs and sort them by creation date in descending order
+    runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
     run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if not run:
@@ -93,7 +94,7 @@ def parse_results(json_path: Path, output_path: Path):
             # need to convert to json to have string key consistency
             item = item | json.loads(json.dumps(get_data_from_wandb(project, run_id)))
             if str(train_steps - 1) not in item["iteration_step"]:
-                typer.echo("data still incomplete, using that data anyways.") 
+                typer.echo("data still incomplete, using that data anyways")
 
         assert batch_size == item["global_batch_size"]["0"]
 
