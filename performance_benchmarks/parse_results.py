@@ -58,6 +58,9 @@ def parse_results(json_path: Path, output_path: Path):
         _max_key = str(max([int(key) for key in item["model_tflops_per_gpu"].keys()]))
         final_consumed_tokens = item["consumed_tokens"][_max_key]
         final_runtime = item["_runtime"][_max_key]
+        total_elapsed_time_s = np.sum(elapsed_time_per_iteration_ms) / 1000.0
+        global_tput_elapsed_time = final_consumed_tokens / total_elapsed_time_s
+        global_tput_runtime = final_consumed_tokens / (final_runtime / 1000.0)
 
         processed_data.append(
             {
@@ -77,6 +80,9 @@ def parse_results(json_path: Path, output_path: Path):
                 "batch_size": batch_size,
                 "final_consumed_tokens": final_consumed_tokens,
                 "final_runtime": final_runtime,
+                "total_elapsed_time_s": total_elapsed_time_s,
+                "global_tput_elapsed_time": global_tput_elapsed_time,
+                "global_tput_runtime": global_tput_runtime,
                 **{k + "_tokens_per_second": v for k, v in compute_stats(tokens_per_second).items()},
                 **{k + "_tokens_per_second_per_gpu": v for k, v in compute_stats(tokens_per_second_per_gpu).items()},
                 **{
