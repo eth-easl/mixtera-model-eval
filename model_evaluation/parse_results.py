@@ -57,6 +57,7 @@ def collect_and_export_results(output_dir: Path):
 
     if all_results:
         df = pd.DataFrame(all_results)
+        df[['checkpoint_id', 'nshot']] = df[['checkpoint_id', 'nshot']].apply(pd.to_numeric)
         column_order = ['checkpoint_id', 'nshot'] + [col for col in df.columns if col not in ['checkpoint_id', 'nshot']]
         df = df[column_order]
         df.sort_values(by=['checkpoint_id', 'nshot'], inplace=True)
