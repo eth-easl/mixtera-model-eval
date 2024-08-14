@@ -131,7 +131,7 @@ def load_yaml_from_file(path: str | Path):
             raise typer.Exit(code=1) from exc
 
 
-def get_data_from_wandb(project: str, run_id: str) -> dict:
+def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
     api = wandb.Api()
     runs = api.runs(project)
     run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
@@ -153,6 +153,14 @@ def get_data_from_wandb(project: str, run_id: str) -> dict:
     if run.state != "finished":
         typer.echo("Timeout reached. Run did not finish in 5 minutes.")
         raise typer.Exit(code=1)
+
+    if (
+        "global_batch_size" not in run.history().to_dict().keys()
+        or "tokens_per_sec" not in run.history().to_dict().keys()
+        and retry < 5
+    ):
+        retry += 1
+        return get_data_from_wandb(project, run_id, retry)
 
     return run.history().to_dict()
 
