@@ -154,7 +154,7 @@ def get_data_from_wandb(project: str, run_id: str) -> dict:
         typer.echo("Timeout reached. Run did not finish in 5 minutes.")
         raise typer.Exit(code=1)
 
-    return run.history().to_json()
+    return run.history().to_dict()
 
 
 def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
