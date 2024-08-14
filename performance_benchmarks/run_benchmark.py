@@ -11,6 +11,7 @@ import socket
 import wandb
 import time
 import math
+from tqdm import tqdm
 
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
@@ -310,7 +311,9 @@ def run_benchmarks(
     else:
         typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
-    for seed, dl_worker, dp, seq_len in itertools.product(seeds, dl_workers, dps, seq_lengths):
+    for seed, dl_worker, dp, seq_len in tqdm(
+        itertools.product(seeds, dl_workers, dps, seq_lengths), desc="Processing configurations"
+    ):
         adjusted_config, additional_info = adjust_base_config(
             base_config, dataset_path, bm_identifier, curr_run, mode, model, dl_worker, dp, seq_len, seed
         )
@@ -324,6 +327,8 @@ def run_benchmarks(
 
         persist_results_to_json(output_file, all_results)
         curr_run += 1
+
+    typer.echo("Ran all benchmarks.")
 
 
 if __name__ == "__main__":
