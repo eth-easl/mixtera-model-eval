@@ -75,7 +75,7 @@ MACHINE_MODEL_MICROBATCH = {
 
 MACHINE_MODEL_TOKENS = {
     MachineType.sgsrtx: {
-        ModelType.tinyllama: 750000,
+        ModelType.tinyllama: 500000,
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
     },
