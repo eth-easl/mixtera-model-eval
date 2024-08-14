@@ -150,10 +150,15 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
         str(bm_config_path),
     ]
     typer.echo(f"Running benchmark with command {command}")
-    subprocess.run(command, check=True)
-    typer.echo("Benchmark done, collecting data")
-    results = get_data_from_wandb(config["general"]["project"], config["general"]["run"])
-    typer.echo("Data collected")
+    proc = subprocess.run(command)
+    if proc.returncode != 0:
+        typer.echo("Process did not exit with exit code 0.")
+        results = {"success": False}
+    else:
+        typer.echo("Benchmark done, collecting data")
+        results = get_data_from_wandb(config["general"]["project"], config["general"]["run"]) | {"success": True}
+        typer.echo("Data collected")
+
     bm_config_path.unlink()
 
     return results
@@ -193,7 +198,7 @@ def validate_user_input(
             typer.echo("Note that you selected RTX3090 gpus but this is not sgs-gpu[01-04].")
             if not ask_to_continue():
                 raise typer.Exit(code=1)
-            
+
     return True
 
 
@@ -293,7 +298,7 @@ def run_benchmarks(
     dps: list[int] = [1, 2, 4, 8, 16],
     seq_lengths: list[int] = [1024, 2048, 4096],
     seeds: list[int] = [42],
-    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache")
+    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"),
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
@@ -303,7 +308,11 @@ def run_benchmarks(
     all_results = []
     bm_identifier = f"mixterabench_{current_milli_time()}"
     curr_run = 0
-    os.environ["HF_DATASETS_CACHE"] = str(huggingface_cache_path)
+
+    if huggingface_cache_path.exists():
+        os.environ["HF_DATASETS_CACHE"] = str(huggingface_cache_path)
+    else:
+        typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
     for seed, dl_worker, dp, seq_len in itertools.product(seeds, dl_workers, dps, seq_lengths):
         adjusted_config, additional_info = adjust_base_config(
