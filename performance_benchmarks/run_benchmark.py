@@ -293,7 +293,7 @@ def run_benchmarks(
     dps: list[int] = [1, 2, 4, 8, 16],
     seq_lengths: list[int] = [1024, 2048, 4096],
     seeds: list[int] = [42],
-    huggingface_cache_path: Path | str = "/scratch/maximilian.boether/hfcache"
+    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache")
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
