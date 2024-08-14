@@ -243,7 +243,7 @@ def adjust_base_config(
 
     # number of tokens that we want to consume (will be rounded up to match batch size/seq length)
     # note after running some benchmarks we probably want to scale this based on the GPU type
-    total_tokens = 2, 000, 000 * dp
+    total_tokens = 2000000 * dp
     batch_size = dp * config["tokens"]["batch_accumulation_per_replica"] * config["tokens"]["micro_batch_size"]
     tokens_per_step = batch_size * seq_length
     train_steps = math.ceil(total_tokens / tokens_per_step)
