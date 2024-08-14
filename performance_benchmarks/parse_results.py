@@ -27,7 +27,7 @@ def parse_results(json_path: Path, output_path: Path):
 
     processed_data = []
 
-    for item in data:
+    for id,item in enumerate(data):
         if item.get("skipped", False):
             continue
 
@@ -46,6 +46,8 @@ def parse_results(json_path: Path, output_path: Path):
         micro_batch_size = int(item["config"]["tokens"].get("micro_batch_size", -1))
 
         batch_size = int(item.get("batch_size", -1))
+        if "global_batch_size" not in item:
+            typer.error(f"no global batch size in item {id}")
         assert batch_size == item["global_batch_size"]["0"]
 
         tokens_per_second = [val for key, val in item["tokens_per_sec"].items() if key not in ["0", 0]]
