@@ -66,7 +66,7 @@ MACHINE_MODEL_MICROBATCH = {
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
     },
-    MachineType.sgsrtx: {
+    MachineType.cscs: {
         ModelType.tinyllama: -1,
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
@@ -129,7 +129,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
     # Persist yaml to disk
     bm_config_path = SCRIPT_DIR / "benchmark.yaml"
     with open(bm_config_path, "w+") as ff:
-        yaml.dump_all(config, ff)
+        yaml.dump(config, ff)
 
     # Run nanotron training on the current node
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
@@ -193,6 +193,8 @@ def validate_user_input(
             typer.echo("Note that you selected RTX3090 gpus but this is not sgs-gpu[01-04].")
             if not ask_to_continue():
                 raise typer.Exit(code=1)
+            
+    return True
 
 
 def load_base_config(model: ModelType) -> dict:
