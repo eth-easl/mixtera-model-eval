@@ -90,7 +90,8 @@ def parse_results(json_path: Path, output_path: Path):
 
         if str(train_steps - 1) not in item["iteration_step"]:
             typer.echo("data from wandb seems incomplete, trying to repair")
-            item = item | get_data_from_wandb(project, run_id)
+            # need to convert to json to have string key consistency
+            item = item | json.loads(json.dumps(get_data_from_wandb(project, run_id)))
             if str(train_steps - 1) not in item["iteration_step"]:
                 typer.echo("data still incomplete, using that data anyways.") 
 
