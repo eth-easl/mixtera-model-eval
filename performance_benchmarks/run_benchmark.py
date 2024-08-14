@@ -348,7 +348,12 @@ def run_benchmarks(
         adjusted_config, additional_info = adjust_base_config(
             base_config, dataset_path, bm_identifier, curr_run, mode, model, dl_worker, dp, seq_len, seed
         )
-        base_results = {"config": adjusted_config} | additional_info
+        base_results = {
+            "config": adjusted_config,
+            "mode": mode,
+            "model": model,
+            "dataset_path": dataset_path,
+        } | additional_info
 
         if additional_info["skipped"]:
             all_results.append(base_results)
