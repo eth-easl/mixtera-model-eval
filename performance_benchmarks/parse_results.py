@@ -31,7 +31,7 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
         typer.echo(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
         raise typer.Exit(code=1)
 
-    timeout = 300  # seconds
+    timeout = 30  # seconds
     start_time = time.time()
     while time.time() - start_time < timeout:
         if run.state == "finished":
@@ -43,7 +43,7 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
 
     if run.state != "finished":
         typer.echo("Timeout reached. Run did not finish in 5 minutes.")
-        raise typer.Exit(code=1)
+        return {}
 
     if (
         "global_batch_size" not in run.history().to_dict().keys()
@@ -65,6 +65,8 @@ def parse_results(json_path: Path, output_path: Path):
 
     for id, item in enumerate(data):
         if item.get("skipped", False):
+            continue
+        if not item.get("success", True):
             continue
 
         mode = item.get("mode", "")
