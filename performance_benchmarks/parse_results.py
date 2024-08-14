@@ -87,6 +87,13 @@ def parse_results(json_path: Path, output_path: Path):
         if "global_batch_size" not in item:
             typer.echo(f"no global batch size in item {id}, trying to repair")
             item = item | get_data_from_wandb(project, run_id)
+
+        if str(train_steps - 1) not in item["iteration_step"]:
+            typer.echo("data from wandb seems incomplete, trying to repair")
+            item = item | get_data_from_wandb(project, run_id)
+            if str(train_steps - 1) not in item["iteration_step"]:
+                typer.echo("data still incomplete, using that data anyways.") 
+
         assert batch_size == item["global_batch_size"]["0"]
 
         tokens_per_second = [val for key, val in item["tokens_per_sec"].items() if key not in ["0", 0]]
