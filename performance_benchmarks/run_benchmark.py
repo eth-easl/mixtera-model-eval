@@ -293,6 +293,7 @@ def run_benchmarks(
     dps: list[int] = [1, 2, 4, 8, 16],
     seq_lengths: list[int] = [1024, 2048, 4096],
     seeds: list[int] = [42],
+    huggingface_cache_path: Path | str = "/scratch/maximilian.boether/hfcache"
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
@@ -302,6 +303,7 @@ def run_benchmarks(
     all_results = []
     bm_identifier = f"mixterabench_{current_milli_time()}"
     curr_run = 0
+    os.environ["HF_DATASETS_CACHE"] = str(huggingface_cache_path)
 
     for seed, dl_worker, dp, seq_len in itertools.product(seeds, dl_workers, dps, seq_lengths):
         adjusted_config, additional_info = adjust_base_config(
