@@ -143,11 +143,12 @@ def get_data_from_wandb(project: str, run_id: str) -> dict:
     timeout = 300  # seconds
     start_time = time.time()
     while time.time() - start_time < timeout:
-        run.reload()  # Reload the run object to update its status
         if run.state == "finished":
             break
         typer.echo("Still waiting for the run to finish on wandb.")
         time.sleep(10)
+        runs = api.runs(project)
+        run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if run.state != "finished":
         typer.echo("Timeout reached. Run did not finish in 5 minutes.")
@@ -333,7 +334,7 @@ def run_benchmarks(
 
     base_config = load_base_config(model)
     all_results = []
-    bm_identifier = f"mixterabench_{current_milli_time()}"
+    bm_identifier = "mixterabenchmark_script"
     curr_run = 0
 
     if huggingface_cache_path.exists():
