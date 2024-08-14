@@ -298,6 +298,7 @@ def run_benchmarks(
 
     if output_file.exists():
         typer.echo(f"Error: file {output_file} already exists")
+        raise typer.Exit(code=1)
 
     base_config = load_base_config(model)
     all_results = []
