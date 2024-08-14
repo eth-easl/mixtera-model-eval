@@ -352,7 +352,7 @@ def run_benchmarks(
             "config": adjusted_config,
             "mode": mode,
             "model": model,
-            "dataset_path": dataset_path,
+            "dataset_path": str(dataset_path),
         } | additional_info
 
         if additional_info["skipped"]:
