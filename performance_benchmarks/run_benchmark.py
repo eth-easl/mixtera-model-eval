@@ -57,7 +57,7 @@ class ModelType(str, Enum):
 # TODO: Find maximum microbatch size per GPU/model combination
 MACHINE_MODEL_MICROBATCH = {
     MachineType.sgsrtx: {
-        ModelType.tinyllama: -1,
+        ModelType.tinyllama: 4,
         ModelType.llama7b: -1,
         ModelType.llama70b: -1,
     },
