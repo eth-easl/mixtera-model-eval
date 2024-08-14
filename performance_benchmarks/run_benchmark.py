@@ -178,7 +178,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
     dp = int(config["parallelism"]["dp"])
     tp = int(config["parallelism"]["tp"])
     pp = int(config["parallelism"]["pp"])
-    nprocs = str(dp * tp * pp)   
+    nprocs = str(dp * tp * pp)
 
     command = [
         "python",
@@ -217,7 +217,7 @@ def validate_user_input(
     mode: MachineType,
     model: ModelType,
 ):
-    if mode == MachineType.sgsrtx and model not in [ModelType.tinyllama, ModelType.llama7b]:
+    if mode == MachineType.sgsrtx and model not in [ModelType.tinyllama]:
         typer.echo(f"RTX 3090 machines don't support model {model}")
         return False
 
@@ -261,6 +261,7 @@ def adjust_base_config(
     dl_worker: int,
     dp: int,
     seq_length: int,
+    batch_accumulation_per_replica: int,
     seed: int,
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
@@ -276,10 +277,9 @@ def adjust_base_config(
     if mode == MachineType.sgsrtx and model == ModelType.tinyllama:
         config["parallelism"]["tp"] = 2
 
-
     # set microbatch size
     # TODO: We need to figure out whether batch_accumulation_per_replica matters. Can we always leave that at 1 for throughput benchmarks? For training, we don't want too small batches becaues that hurts convergence. However, for tput, in my understanding, increasing it to 2 will double the factual batch size, but keep the number of forward passes. So it should not affect throughput. Need to benchmark that though.
-    config["tokens"]["batch_accumulation_per_replica"] = 1
+    config["tokens"]["batch_accumulation_per_replica"] = batch_accumulation_per_replica
     config["tokens"]["micro_batch_size"] = MACHINE_MODEL_MICROBATCH[mode][model]
 
     # set sequence length
@@ -334,6 +334,7 @@ def run_benchmarks(
     dl_workers: list[int] = [0, 1, 4, 16, 32],
     dps: list[int] = [1, 2, 4, 8, 16],
     seq_lengths: list[int] = [1024, 2048, 4096],
+    batch_accumulation_per_replicas: list[int] = [1],
     seeds: list[int] = [42],
     huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"),
 ):
@@ -357,11 +358,12 @@ def run_benchmarks(
     else:
         typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
-    for seed, dl_worker, dp, seq_len in tqdm(
-        list(itertools.product(seeds, dl_workers, dps, seq_lengths)), desc="Processing configurations"
+    for seed, dl_worker, dp, seq_len, bacc in tqdm(
+        list(itertools.product(seeds, dl_workers, dps, seq_lengths, batch_accumulation_per_replicas)),
+        desc="Processing configurations",
     ):
         adjusted_config, additional_info = adjust_base_config(
-            base_config, dataset_path, bm_identifier, curr_run, mode, model, dl_worker, dp, seq_len, seed
+            base_config, dataset_path, bm_identifier, curr_run, mode, model, dl_worker, dp, seq_len, bacc, seed
         )
         base_results = {
             "config": adjusted_config,
