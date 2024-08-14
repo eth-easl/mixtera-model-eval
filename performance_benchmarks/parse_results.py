@@ -135,7 +135,7 @@ def parse_results(json_path: Path, output_path: Path):
                 "total_elapsed_time_s": total_elapsed_time_s,
                 "global_tput_elapsed_time": global_tput_elapsed_time,
                 "global_tput_runtime": global_tput_runtime,
-                sus: sus,
+                "sus": sus,
                 **{k + "_tokens_per_second": v for k, v in compute_stats(tokens_per_second).items()},
                 **{k + "_tokens_per_second_per_gpu": v for k, v in compute_stats(tokens_per_second_per_gpu).items()},
                 **{
