@@ -83,6 +83,7 @@ def parse_results(json_path: Path, output_path: Path):
         train_steps = int(item["config"]["tokens"].get("train_steps", -1))
         batch_accumulation_per_replica = int(item["config"]["tokens"].get("batch_accumulation_per_replica", -1))
         micro_batch_size = int(item["config"]["tokens"].get("micro_batch_size", -1))
+        sus = False
 
         batch_size = int(item.get("batch_size", -1))
         if "global_batch_size" not in item:
@@ -95,6 +96,7 @@ def parse_results(json_path: Path, output_path: Path):
             item = item | json.loads(json.dumps(get_data_from_wandb(project, run_id)))
             if str(train_steps - 1) not in item["iteration_step"]:
                 typer.echo("data still incomplete, using that data anyways")
+                sus = True
 
         assert batch_size == item["global_batch_size"]["0"]
 
@@ -133,6 +135,7 @@ def parse_results(json_path: Path, output_path: Path):
                 "total_elapsed_time_s": total_elapsed_time_s,
                 "global_tput_elapsed_time": global_tput_elapsed_time,
                 "global_tput_runtime": global_tput_runtime,
+                sus: sus,
                 **{k + "_tokens_per_second": v for k, v in compute_stats(tokens_per_second).items()},
                 **{k + "_tokens_per_second_per_gpu": v for k, v in compute_stats(tokens_per_second_per_gpu).items()},
                 **{
