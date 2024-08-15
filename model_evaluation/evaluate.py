@@ -140,7 +140,7 @@ def evaluate_checkpoints(
 def convert_and_evaluate(
     checkpoint_dir: Path,
     output_dir: Path,
-    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue,gpqa",
+    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue",
     data_parallel: int = 1,
     skip_conversion: bool = False,
     seed: int = 1337,
