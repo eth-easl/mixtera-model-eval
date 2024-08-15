@@ -296,14 +296,16 @@ def adjust_base_config(
     config["data_stages"][0]["data"]["dataset"]["hf_dataset_or_datasets"] = str(dataset_path)
 
     # number of tokens that we want to consume (will be rounded up to match batch size/seq length)
-    total_tokens = MACHINE_MODEL_TOKENS[mode][model] * dp
+    scheduled_total_tokens = MACHINE_MODEL_TOKENS[mode][model] * dp
     batch_size = dp * config["tokens"]["batch_accumulation_per_replica"] * config["tokens"]["micro_batch_size"]
     tokens_per_step = batch_size * seq_length
-    train_steps = math.ceil(total_tokens / tokens_per_step)
+    train_steps = max(math.ceil(scheduled_total_tokens / tokens_per_step), 10) # minimum of 10 training steps per benchmark
     config["tokens"]["train_steps"] = train_steps
+    calculated_total_tokens = train_steps * tokens_per_step
 
     additional_info = {
-        "total_tokens": total_tokens,
+        "scheduled_total_tokens": scheduled_total_tokens,
+        "calculated_total_tokens": calculated_total_tokens,
         "tokens_per_step": tokens_per_step,
         "batch_size": batch_size,
         "skipped": False,
