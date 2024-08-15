@@ -1,3 +1,4 @@
+import os
 import typer
 from pathlib import Path
 import yaml
@@ -97,6 +98,7 @@ def evaluate_checkpoints(
     seed: int,
     num_fewshots: list[int],
 ):
+    os.environ["HF_DATASETS_TRUST_REMOTE_CODE"] = "1"
     for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
         if not save_path.exists():
