@@ -268,7 +268,7 @@ def adjust_base_config(
 
     # set wandb info
     config["general"]["project"] = bm_identifier
-    config["general"]["run"] = f"run{curr_run}_dp{dp}_seed{seed}_w{dl_worker}_s{seq_length}_{mode}_{model}"
+    config["general"]["run"] = f"run{curr_run}_dp{dp}_seed{seed}_w{dl_worker}_s{seq_length}_acc{batch_accumulation_per_replica}_{mode}_{model}"
 
     # set number of dp nodes
     config["parallelism"]["dp"] = dp
