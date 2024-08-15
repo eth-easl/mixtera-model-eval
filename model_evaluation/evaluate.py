@@ -142,12 +142,12 @@ def evaluate_checkpoints(
 def convert_and_evaluate(
     checkpoint_dir: Path,
     output_dir: Path,
-    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue",
+    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue,arc_easy",
     data_parallel: int = 1,
     skip_conversion: bool = False,
     seed: int = 1337,
     use_all_chkpnts: bool = False,
-    num_fewshots: list[int] = [0, 1, 5],
+    num_fewshots: list[int] = [0, 1],
 ):
     check_nanotron_availability()
     check_lm_eval_availability()
