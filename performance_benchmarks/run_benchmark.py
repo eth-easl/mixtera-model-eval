@@ -357,7 +357,7 @@ def run_benchmarks(
         typer.echo(f"Error: file {output_file} already exists. Specify --skip-existing to continue run.")
         raise typer.Exit(code=1)
 
-    if output_file.exists() and not skip_existing:
+    if output_file.exists() and skip_existing:
         bak_path = output_file.parent / f"{benchmark_name}.json.bak{current_milli_time()}"
         shutil.copyfile(output_file, bak_path)
         typer.echo(
