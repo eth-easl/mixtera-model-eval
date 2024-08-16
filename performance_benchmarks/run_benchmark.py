@@ -1,4 +1,5 @@
 from enum import Enum
+import shutil
 import typer
 from pathlib import Path
 import yaml
@@ -141,18 +142,19 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
         typer.echo(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
         raise typer.Exit(code=1)
 
-    timeout = 300  # seconds
+    timeout = 600  # seconds
     start_time = time.time()
     while time.time() - start_time < timeout:
         if run.state == "finished":
             break
         typer.echo("Still waiting for the run to finish on wandb.")
         time.sleep(10)
-        runs = api.runs(project)
+        api = wandb.Api()
+        runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
         run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if run.state != "finished":
-        typer.echo("Timeout reached. Run did not finish in 5 minutes.")
+        typer.echo("Timeout reached. Run did not finish in 10 minutes.")
         raise typer.Exit(code=1)
 
     if (
@@ -268,7 +270,9 @@ def adjust_base_config(
 
     # set wandb info
     config["general"]["project"] = bm_identifier
-    config["general"]["run"] = f"run{curr_run}_dp{dp}_seed{seed}_w{dl_worker}_s{seq_length}_acc{batch_accumulation_per_replica}_{mode}_{model}"
+    config["general"]["run"] = (
+        f"run{curr_run}_dp{dp}_seed{seed}_w{dl_worker}_s{seq_length}_acc{batch_accumulation_per_replica}_{mode}_{model}"
+    )
 
     # set number of dp nodes
     config["parallelism"]["dp"] = dp
@@ -299,7 +303,9 @@ def adjust_base_config(
     scheduled_total_tokens = MACHINE_MODEL_TOKENS[mode][model] * dp
     batch_size = dp * config["tokens"]["batch_accumulation_per_replica"] * config["tokens"]["micro_batch_size"]
     tokens_per_step = batch_size * seq_length
-    train_steps = max(math.ceil(scheduled_total_tokens / tokens_per_step), 10) # minimum of 10 training steps per benchmark
+    train_steps = max(
+        math.ceil(scheduled_total_tokens / tokens_per_step), 10
+    )  # minimum of 10 training steps per benchmark
     config["tokens"]["train_steps"] = train_steps
     calculated_total_tokens = train_steps * tokens_per_step
 
@@ -339,6 +345,7 @@ def run_benchmarks(
     batch_accumulation_per_replicas: list[int] = [1],
     seeds: list[int] = [42],
     huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"),
+    skip_existing: bool = False,
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
@@ -346,12 +353,38 @@ def run_benchmarks(
     output_file = output_dir / f"{benchmark_name}.json"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if output_file.exists():
-        typer.echo(f"Error: file {output_file} already exists")
+    if output_file.exists() and not skip_existing:
+        typer.echo(f"Error: file {output_file} already exists. Specify --skip-existing to continue run.")
         raise typer.Exit(code=1)
 
-    base_config = load_base_config(model)
+    if output_file.exists() and not skip_existing:
+        bak_path = output_file.parent / f"{benchmark_name}.json.bak{current_milli_time()}"
+        shutil.copyfile(output_file, bak_path)
+        typer.echo(
+            f"Warning: file {output_file} already exists, copied to {bak_path} since --skip-existing is enabled."
+        )
+
+    if not output_file.exists() and skip_existing:
+        typer.echo(
+            f"Warning: --skip-existing is enabled, but output file {output_file} does not exist. Won't skip anything"
+        )
+
     all_results = []
+    existing_runs = set()
+    if skip_existing and output_file.exists():
+        with open(output_file, "r") as file:
+            all_results = json.load(file)
+
+        for item in all_results:
+            if item.get("skipped", False):
+                continue
+            if not item.get("success", True):
+                continue
+            _run_id = item["config"]["general"].get("run", None)
+            if _run_id is not None and _run_id != "":
+                existing_runs.add(_run_id)
+
+    base_config = load_base_config(model)
     bm_identifier = "mixterabenchmark_script"
     curr_run = 0
 
@@ -378,9 +411,13 @@ def run_benchmarks(
             all_results.append(base_results)
             continue
 
-        all_results.append(base_results | run_benchmark(adjusted_config, mode))
-
+        run_id = adjusted_config["general"]["run"]
+        if run_id not in existing_runs:
+            all_results.append(base_results | run_benchmark(adjusted_config, mode))
+        else:
+            typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
         persist_results_to_json(output_file, all_results)
+
         curr_run += 1
 
     typer.echo("Ran all benchmarks.")
