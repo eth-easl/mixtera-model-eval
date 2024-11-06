@@ -222,7 +222,9 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
         proc_per_node = num_gpus
 
     if num_nodes > 1 and num_gpus % 4 != 0:
-        raise RuntimeError(f"num_nodes = {num_nodes} > 1 and num_gpus = {num_gpus} not divisible by 4, this is currently not supported.")
+        raise RuntimeError(
+            f"num_nodes = {num_nodes} > 1 and num_gpus = {num_gpus} not divisible by 4, this is currently not supported."
+        )
 
     # Save the benchmark configuration in the shared directory
     bm_config_path = shared_dir / f"{job_name}_benchmark.yaml"
@@ -327,10 +329,41 @@ numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
                     typer.echo(f"Job {job_id} is still running...")
                     time.sleep(10)
 
-            # Collect results from wandb
-            typer.echo("Job completed, collecting data from WandB.")
-            results = get_data_from_wandb(config["general"]["project"], config["general"]["run"]) | {"success": True}
-            typer.echo("Data collected")
+            sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+
+            if sacct_proc.returncode != 0:
+                typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
+                return {"success": False}
+            else:
+                sacct_output = sacct_proc.stdout.strip()
+                if not sacct_output:
+                    typer.echo(f"No accounting information found for job {job_id}.")
+                    return {"success": False}
+
+                job_info = sacct_output.split("|")
+                if len(job_info) >= 3:
+                    state = job_info[1]
+                    exit_code = job_info[2]
+
+                    if state != "COMPLETED" or not exit_code.startswith("0:0"):
+                        typer.echo(f"Job {job_id} did not complete successfully.")
+                        typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
+                        typer.echo(f"Please check the logs at {output_file} and {error_file} for details.")
+                        return {"success": False}
+                    else:
+                        typer.echo(f"Job {job_id} completed successfully.")
+
+                        # Collect results from WandB
+                        typer.echo("Collecting data from Weights & Biases.")
+                        results = get_data_from_wandb(config["general"]["project"], config["general"]["run"]) | {
+                            "success": True
+                        }
+                        typer.echo("Data collected")
+                        return results
+                else:
+                    typer.echo(f"Unexpected sacct output: {sacct_output}")
+                    return {"success": False}
 
     return results
 
