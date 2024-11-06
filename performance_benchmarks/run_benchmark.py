@@ -17,31 +17,6 @@ from tqdm import tqdm
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
 
-# Machine: RTX 3090, H100, GH200
-# Model: TinyLlama 1B, Llama7B, Llamba70B
-# Model+Machine fixes pp and tp => defines base config
-# TODO: Find out parameters for LLama7B and 70B.
-# Llama2 vs 3? do they define different architecture params?
-# what learning rate schedule to use? (probably irrelevant for tput though)
-# Global batch size: Accumulation step, micro batch size
-# Might depend on machine/model combination?
-# Sequence Length: 1024, 2048, 4096
-# Does sequence length influence batch size?
-# (it should, for the same batch size if we double num tokens per sec we double the amount of data fed into the model
-# Datalocation: Locally on NVMe (if applicable, probably only our machine), NFS
-# Interface: Huggingface mapped, Huggingface Iterable, Nanoset, Mosaic Streaming, WebDatasets, Mixtera
-# Data-Loading Workers: 0,1,4,16,32
-# dp instances: 1,2,4,8,16
-# for sgs-gpu machines, there is an inherent constraint since we only try single node
-# for swiss ai, let's see how much we can scale up with the baselines and then with mixtera
-# Mixtera-Specific Parameters: Mixture Window, Chunk Workers, stream via server, local vs server (only for dp=1, tinyllama 1b)
-
-# This script should build up the cross product of all configurations
-# Then execute each configuration
-# Either: sgs-gpu machine OR SwissAI cluster
-# Each training should run for 5-10 minutes (configurable?)
-# Then, collect results (either wandb and/or local logging added to nanotron) after each run, build up csv with results, always persist.
-
 
 class MachineType(str, Enum):
     sgsrtx = "sgsrtx"
@@ -50,44 +25,47 @@ class MachineType(str, Enum):
 
 
 class ModelType(str, Enum):
-    tinyllama = "tinyllama"
-    llama7b = "llama7b"
+    smollm135m = "smollm135m"
+    llama1b = "llama1b"
+    llama8b = "llama8b"
     llama70b = "llama70b"
 
 
 # TODO: Find maximum microbatch size per GPU/model combination
 MACHINE_MODEL_MICROBATCH = {
     MachineType.sgsrtx: {
-        ModelType.tinyllama: 1,  # tested > 1, goes OOM
-        ModelType.llama7b: -1,
+        ModelType.llama1b: 1,  # tested > 1, goes OOM
+        ModelType.llama8b: -1,
         ModelType.llama70b: -1,
     },
     MachineType.sgsh100: {
-        ModelType.tinyllama: 4,
-        ModelType.llama7b: -1,
+        ModelType.llama1b: 4,
+        ModelType.llama8b: -1,
         ModelType.llama70b: -1,
     },
     MachineType.cscs: {
-        ModelType.tinyllama: -1,
-        ModelType.llama7b: -1,
-        ModelType.llama70b: -1,
+        ModelType.smollm135m: 64, # not tested
+        ModelType.llama1b: 2, # more goes OOM
+        ModelType.llama8b: 6, # not tested
+        ModelType.llama70b: 1, # not tested
     },
 }
 
 MACHINE_MODEL_TOKENS = {
     MachineType.sgsrtx: {
-        ModelType.tinyllama: 500000,
-        ModelType.llama7b: -1,
+        ModelType.llama1b: 500000,
+        ModelType.llama8b: -1,
         ModelType.llama70b: -1,
     },
     MachineType.sgsh100: {
-        ModelType.tinyllama: 2000000,
-        ModelType.llama7b: 2000000,
+        ModelType.llama1b: 2000000,
+        ModelType.llama8b: 2000000,
         ModelType.llama70b: 2000000,
     },
     MachineType.cscs: {
-        ModelType.tinyllama: 2000000,
-        ModelType.llama7b: 2000000,
+        ModelType.smollm135m: 2000000,
+        ModelType.llama1b: 2000000,
+        ModelType.llama8b: 2000000,
         ModelType.llama70b: 2000000,
     },
 }
@@ -176,6 +154,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
 
     # Run nanotron training on the current node
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "16"
 
     dp = int(config["parallelism"]["dp"])
     tp = int(config["parallelism"]["tp"])
@@ -219,7 +198,7 @@ def validate_user_input(
     mode: MachineType,
     model: ModelType,
 ):
-    if mode == MachineType.sgsrtx and model not in [ModelType.tinyllama]:
+    if mode == MachineType.sgsrtx and model not in [ModelType.smollm135m, ModelType.llama1b]:
         typer.echo(f"RTX 3090 machines don't support model {model}")
         return False
 
@@ -246,8 +225,12 @@ def validate_user_input(
 
 
 def load_base_config(model: ModelType) -> dict:
-    if model == ModelType.tinyllama:
-        return load_yaml_from_file(SCRIPT_DIR / "tinyllama.yaml")
+    if model == ModelType.llama1b:
+        return load_yaml_from_file(SCRIPT_DIR / "llama1b.yaml")
+    if model == ModelType.llama8b:
+        return load_yaml_from_file(SCRIPT_DIR / "llama8b.yaml")
+    if model == ModelType.smollm135m:
+        return load_yaml_from_file(SCRIPT_DIR / "smollm135m.yaml")
 
     typer.echo(f"Error: No config yet for model `{model}`")
     raise typer.Exit(code=1)
@@ -277,12 +260,21 @@ def adjust_base_config(
     # set number of dp nodes
     config["parallelism"]["dp"] = dp
 
-    # update tp nodes if necessary
-    if mode == MachineType.sgsrtx and model == ModelType.tinyllama:
-        config["parallelism"]["tp"] = 2
+    # update tp/pp for node/model pairs
+    if mode == MachineType.sgsrtx:
+        if model == ModelType.llama1b:
+            config["parallelism"]["tp"] = 2
+
+    if mode == MachineType.cscs:
+        if model in {ModelType.llama1b, ModelType.smollm135m}:
+            config["parallelism"]["tp"] = 1
+            config["parallelism"]["pp"] = 1
+
+        if model == ModelType.llama8b:
+            config["parallelism"]["tp"] = 2
+            config["parallelism"]["pp"] = 1
 
     # set microbatch size
-    # TODO: We need to figure out whether batch_accumulation_per_replica matters. Can we always leave that at 1 for throughput benchmarks? For training, we don't want too small batches becaues that hurts convergence. However, for tput, in my understanding, increasing it to 2 will double the factual batch size, but keep the number of forward passes. So it should not affect throughput. Need to benchmark that though.
     config["tokens"]["batch_accumulation_per_replica"] = batch_accumulation_per_replica
     config["tokens"]["micro_batch_size"] = MACHINE_MODEL_MICROBATCH[mode][model]
 
@@ -324,6 +316,16 @@ def adjust_base_config(
         additional_info["skipped"] = True
         additional_info["skip_reason"] = f"total_nodes = {total_nodes} > 4 for sgs machine"
 
+    if not config["tokens"]["batch_accumulation_per_replica"] >= config["parallelism"]["pp"] - 1:
+        additional_info["skipped"] = True
+        additional_info["skip_reason"] = f"batch_accumulation_per_replica = {batch_accumulation_per_replica} not <= pp - 1 = {config['parallelism']['pp'] - 1:}"
+
+    # these should not happen.
+    if config["model"]["hidden_size"] % config["model"]["num_attention_heads"] != 0:
+        raise RuntimeError("hidden_size needs to be divisible by num_attention_heads")
+    if config["model"]["num_attention_heads"] % config["parallelism"]["tp"] != 0:
+        raise RuntimeError("num_attention_heads needs to be divisible by tp")
+
     return config, additional_info
 
 
@@ -339,12 +341,12 @@ def run_benchmarks(
     mode: MachineType,
     model: ModelType,
     dataset_path: Path,
-    dl_workers: list[int] = [0, 1, 4, 16, 32],
+    dl_workers: list[int] = [0, 1, 2, 4],
     dps: list[int] = [1, 2, 4, 8, 16],
-    seq_lengths: list[int] = [1024, 2048, 4096],
-    batch_accumulation_per_replicas: list[int] = [1],
+    seq_lengths: list[int] = [4096],
+    batch_accumulation_per_replicas: list[int] = [1, 2, 4, 8, 16],
     seeds: list[int] = [42],
-    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"),
+    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"), # /iopsstor/scratch/cscs/mbther/hfcache
     skip_existing: bool = False,
 ):
     if not validate_user_input(mode, model):
@@ -389,7 +391,12 @@ def run_benchmarks(
     curr_run = 0
 
     if huggingface_cache_path.exists():
-        os.environ["HF_DATASETS_CACHE"] = str(huggingface_cache_path)
+        dataset_cache_path = huggingface_cache_path / "data"
+        home_path = huggingface_cache_path / "home"
+        dataset_cache_path.mkdir(exist_ok=True)
+        home_path.mkdir(exist_ok=True)
+        os.environ["HF_DATASETS_CACHE"] = str(dataset_cache_path)
+        os.environ["HF_HOME"] = str(home_path)
     else:
         typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
