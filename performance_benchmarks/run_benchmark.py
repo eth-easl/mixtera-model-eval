@@ -206,7 +206,7 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
     data_cache_dir.mkdir(parents=True, exist_ok=True)
     hf_home_dir.mkdir(parents=True, exist_ok=True)
 
-    if Path(NANOTRON_REPO_PATH).exists():
+    if not Path(NANOTRON_REPO_PATH).exists():
         raise RuntimeError(f"Cannot find nanotron at {NANOTRON_REPO_PATH}")
 
     job_name = config["general"]["run"]
