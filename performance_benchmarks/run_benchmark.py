@@ -217,6 +217,13 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
     num_gpus = dp * tp * pp
     num_nodes = math.ceil(num_gpus / SLURM_GPUS_PER_TASK)
 
+    proc_per_node = 4
+    if num_gpus < 4 and num_nodes == 1:
+        proc_per_node = num_gpus
+
+    if num_nodes > 1 and num_gpus % 4 != 0:
+        raise RuntimeError(f"num_nodes = {num_nodes} > 1 and num_gpus = {num_gpus} not divisible by 4, this is currently not supported.")
+
     # Save the benchmark configuration in the shared directory
     bm_config_path = shared_dir / f"{job_name}_benchmark.yaml"
     with open(bm_config_path, "w+") as f:
@@ -265,7 +272,7 @@ cd {NANOTRON_REPO_PATH}
 pip install -e . --no-dependencies
 
 numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
-    --nproc-per-node={SLURM_GPUS_PER_TASK} \\
+    --nproc-per-node={proc_per_node} \\
     --node-rank=$SLURM_PROCID \\
     --master-addr=$MASTER_ADDR \\
     --master-port=$MASTER_PORT \\
