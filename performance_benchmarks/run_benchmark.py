@@ -44,10 +44,10 @@ MACHINE_MODEL_MICROBATCH = {
         ModelType.llama70b: -1,
     },
     MachineType.cscs: {
-        ModelType.smollm135m: 64, # not tested
-        ModelType.llama1b: 2, # more goes OOM
-        ModelType.llama8b: 6, # not tested
-        ModelType.llama70b: 1, # not tested
+        ModelType.smollm135m: 64,  # not tested
+        ModelType.llama1b: 2,  # more goes OOM
+        ModelType.llama8b: 6,  # not tested
+        ModelType.llama70b: 1,  # not tested
     },
 }
 
@@ -69,6 +69,18 @@ MACHINE_MODEL_TOKENS = {
         ModelType.llama70b: 2000000,
     },
 }
+
+OMP_NUM_THREADS = "16"
+
+SLURM_PARTITION = "normal"
+SLURM_TIME = "00:15:00"
+SLURM_ACCOUNT = "a06"
+SLURM_GPUS_PER_TASK = 4
+SLURM_MEM = "460000"
+
+NANOTRON_REPO_PATH = f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/nanotron"
+SHARED_DIR_DEFAULT = Path(f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/nanotron-benchmarks")
+CONTAINER_ENVIRONMENT = "/store/swissai/a06/containers/nanotron_pretrain/nanotron_pretrain.toml"
 
 
 def check_nanotron_availability():
@@ -154,7 +166,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
 
     # Run nanotron training on the current node
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
-    os.environ["OMP_NUM_THREADS"] = "16"
+    os.environ["OMP_NUM_THREADS"] = OMP_NUM_THREADS
 
     dp = int(config["parallelism"]["dp"])
     tp = int(config["parallelism"]["tp"])
@@ -186,9 +198,141 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
     return results
 
 
-def run_benchmark(config: dict, mode: MachineType) -> dict:
-    if mode in [MachineType.sgsh100, MachineType.sgsrtx]:
+def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
+    # Ensure shared directory exists
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    data_cache_dir = shared_dir / "hf_data"
+    hf_home_dir = shared_dir / "hf_home"
+    data_cache_dir.mkdir(parents=True, exist_ok=True)
+    hf_home_dir.mkdir(parents=True, exist_ok=True)
+
+    if Path(NANOTRON_REPO_PATH).exists():
+        raise RuntimeError(f"Cannot find nanotron at {NANOTRON_REPO_PATH}")
+
+    job_name = config["general"]["run"]
+    dp = int(config["parallelism"]["dp"])
+    tp = int(config["parallelism"]["tp"])
+    pp = int(config["parallelism"]["pp"])
+
+    num_gpus = dp * tp * pp
+    num_nodes = math.ceil(num_gpus / SLURM_GPUS_PER_TASK)
+
+    # Save the benchmark configuration in the shared directory
+    bm_config_path = shared_dir / f"{job_name}_benchmark.yaml"
+    with open(bm_config_path, "w+") as f:
+        yaml.dump(config, f)
+
+    # Paths for logs
+    log_dir = shared_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    output_file = log_dir / f"{job_name}_output.log"
+    error_file = log_dir / f"{job_name}_output.err"
+
+    sbatch_header = f"""#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --account={account}
+#SBATCH --nodes={num_nodes}
+#SBATCH --ntasks-per-node=1
+#SBATCH --time={SLURM_TIME}
+#SBATCH --output={output_file}
+#SBATCH --error={error_file}
+#SBATCH --partition={SLURM_PARTITION}
+#SBATCH --no-requeue
+#SBATCH --mem={SLURM_MEM}
+#SBATCH --gpus-per-task={SLURM_GPUS_PER_TASK}
+"""
+
+    env_vars = f"""
+export OMP_NUM_THREADS={OMP_NUM_THREADS}
+export MASTER_PORT=25678
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export ENROOT_LIBRARY_PATH=/capstor/scratch/cscs/fmohamed/enrootlibn
+export WANDB_DIR={shared_dir}/wandb
+export WANDB_API_KEY={os.environ.get('WANDB_API_KEY', '')}
+export HF_TOKEN={os.environ.get('HF_TOKEN', '')}
+export MASTER_ADDR=$(hostname)
+export HF_HOME={hf_home_dir}
+export HF_DATASETS_CACHE={data_cache_dir}
+"""
+
+    # Commands to run
+    commands = f"""
+set -eo pipefail
+
+srun -ul --container-writable --environment={CONTAINER_ENVIRONMENT} bash -c "
+cd {NANOTRON_REPO_PATH}
+
+pip install -e . --no-dependencies
+
+numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
+    --nproc-per-node={SLURM_GPUS_PER_TASK} \\
+    --node-rank=$SLURM_PROCID \\
+    --master-addr=$MASTER_ADDR \\
+    --master-port=$MASTER_PORT \\
+    --role $(hostname -s) \\
+    run_train.py --config-file {bm_config_path}
+"
+"""
+
+    # Combine all parts into the SBATCH script
+    sbatch_script = sbatch_header + env_vars + commands
+
+    # Save SBATCH script to file in the shared directory
+    sbatch_script_path = shared_dir / f"{job_name}_run.slurm"
+    with open(sbatch_script_path, "w+") as f:
+        f.write(sbatch_script)
+
+    if num_nodes > 1:  # avoid NCCL issues
+        typer.echo(f"Skipping job due to num_nodes = {num_nodes} > 1")
+        return {"success": False}
+
+    # Submit the job
+    typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
+    submit_command = ["sbatch", str(sbatch_script_path)]
+    proc = subprocess.run(submit_command, capture_output=True, text=True)
+    if proc.returncode != 0:
+        typer.echo(f"Error submitting job: {proc.stderr}")
+        results = {"success": False}
+    else:
+        typer.echo(f"Job submitted, sbatch output: {proc.stdout}")
+        # Extract job ID from sbatch output
+        job_id = None
+        for line in proc.stdout.strip().split("\n"):
+            if "Submitted batch job" in line:
+                job_id = line.strip().split()[-1]
+                break
+        if job_id is None:
+            typer.echo("Could not determine job ID from sbatch output.")
+            results = {"success": False}
+        else:
+            # Wait for the job to complete
+            typer.echo(f"Waiting for job {job_id} to complete...")
+            job_complete = False
+            while not job_complete:
+                squeue_cmd = ["squeue", "-j", str(job_id)]
+                squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
+                if squeue_proc.returncode != 0:
+                    typer.echo(f"Error checking job status: {squeue_proc.stderr}")
+                    break
+                elif job_id not in squeue_proc.stdout:
+                    job_complete = True
+                else:
+                    typer.echo(f"Job {job_id} is still running...")
+                    time.sleep(10)
+
+            # Collect results from wandb
+            typer.echo("Job completed, collecting data from WandB.")
+            results = get_data_from_wandb(config["general"]["project"], config["general"]["run"]) | {"success": True}
+            typer.echo("Data collected")
+
+    return results
+
+
+def run_benchmark(config: dict, mode: MachineType, account: str, shared_dir: Path) -> dict:
+    if mode in [MachineType.sgsrtx, MachineType.sgsh100]:
         return run_benchmark_on_sgs(config, mode)
+    elif mode == MachineType.cscs:
+        return run_benchmark_on_cscs(config, account, shared_dir)
 
     typer.echo(f"Error: No implementation yet for mode `{mode}`")
     raise typer.Exit(code=1)
@@ -209,15 +353,15 @@ def validate_user_input(
             typer.echo(f"Cannot find run script at {run_script_path}")
             raise typer.Exit(code=1)
 
-        # due to SSH shenanagans, this needs to run on an sgs machine
+        # Due to SSH shenanigans, this needs to run on an sgs machine
         hostname = socket.gethostname().split(".")[0]
         if mode == MachineType.sgsh100 and hostname != "sgs-gpu07":
-            typer.echo("Note that you selected H100 gpus but this is not sgs-gpu07.")
+            typer.echo("Note that you selected H100 GPUs but this is not sgs-gpu07.")
             if not ask_to_continue():
                 raise typer.Exit(code=1)
 
         if mode == MachineType.sgsrtx and hostname not in ["sgs-gpu01", "sgs-gpu02", "sgs-gpu03", "sgs-gpu04"]:
-            typer.echo("Note that you selected RTX3090 gpus but this is not sgs-gpu[01-04].")
+            typer.echo("Note that you selected RTX3090 GPUs but this is not sgs-gpu[01-04].")
             if not ask_to_continue():
                 raise typer.Exit(code=1)
 
@@ -251,16 +395,16 @@ def adjust_base_config(
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
 
-    # set wandb info
+    # Set wandb info
     config["general"]["project"] = bm_identifier
     config["general"]["run"] = (
         f"run{curr_run}_dp{dp}_seed{seed}_w{dl_worker}_s{seq_length}_acc{batch_accumulation_per_replica}_{mode}_{model}"
     )
 
-    # set number of dp nodes
+    # Set number of dp nodes
     config["parallelism"]["dp"] = dp
 
-    # update tp/pp for node/model pairs
+    # Update tp/pp for node/model pairs
     if mode == MachineType.sgsrtx:
         if model == ModelType.llama1b:
             config["parallelism"]["tp"] = 2
@@ -274,30 +418,30 @@ def adjust_base_config(
             config["parallelism"]["tp"] = 2
             config["parallelism"]["pp"] = 1
 
-    # set microbatch size
+    # Set microbatch size
     config["tokens"]["batch_accumulation_per_replica"] = batch_accumulation_per_replica
     config["tokens"]["micro_batch_size"] = MACHINE_MODEL_MICROBATCH[mode][model]
 
-    # set sequence length
+    # Set sequence length
     config["tokens"]["sequence_length"] = seq_length
     config["model"]["model_config"]["max_position_embeddings"] = seq_length
 
-    # set number of data loading workers
+    # Set number of data loading workers
     assert len(config["data_stages"]) == 1, "data stages should only be 1"
     config["data_stages"][0]["data"]["num_loading_workers"] = dl_worker
-    # set seed
+    # Set seed
     config["data_stages"][0]["data"]["seed"] = seed
     config["general"]["seed"] = seed
-    # set dataset path
+    # Set dataset path
     config["data_stages"][0]["data"]["dataset"]["hf_dataset_or_datasets"] = str(dataset_path)
 
-    # number of tokens that we want to consume (will be rounded up to match batch size/seq length)
+    # Number of tokens that we want to consume (will be rounded up to match batch size/seq length)
     scheduled_total_tokens = MACHINE_MODEL_TOKENS[mode][model] * dp
     batch_size = dp * config["tokens"]["batch_accumulation_per_replica"] * config["tokens"]["micro_batch_size"]
     tokens_per_step = batch_size * seq_length
     train_steps = max(
         math.ceil(scheduled_total_tokens / tokens_per_step), 10
-    )  # minimum of 10 training steps per benchmark
+    )  # Minimum of 10 training steps per benchmark
     config["tokens"]["train_steps"] = train_steps
     calculated_total_tokens = train_steps * tokens_per_step
 
@@ -310,7 +454,7 @@ def adjust_base_config(
         "skip_reason": "",
     }
 
-    # now decide whether this run should be skipped
+    # Now decide whether this run should be skipped
     total_nodes = dp * int(config["parallelism"]["tp"]) * int(config["parallelism"]["pp"])
     if mode in [MachineType.sgsrtx, MachineType.sgsh100] and total_nodes > 4:
         additional_info["skipped"] = True
@@ -318,12 +462,14 @@ def adjust_base_config(
 
     if not config["tokens"]["batch_accumulation_per_replica"] >= config["parallelism"]["pp"] - 1:
         additional_info["skipped"] = True
-        additional_info["skip_reason"] = f"batch_accumulation_per_replica = {batch_accumulation_per_replica} not <= pp - 1 = {config['parallelism']['pp'] - 1:}"
+        additional_info["skip_reason"] = (
+            f"batch_accumulation_per_replica = {batch_accumulation_per_replica} not <= pp - 1 = {config['parallelism']['pp'] - 1:}"
+        )
 
-    # these should not happen.
-    if config["model"]["hidden_size"] % config["model"]["num_attention_heads"] != 0:
+    # These should not happen.
+    if config["model"]["model_config"]["hidden_size"] % config["model"]["model_config"]["num_attention_heads"] != 0:
         raise RuntimeError("hidden_size needs to be divisible by num_attention_heads")
-    if config["model"]["num_attention_heads"] % config["parallelism"]["tp"] != 0:
+    if config["model"]["model_config"]["num_attention_heads"] % config["parallelism"]["tp"] != 0:
         raise RuntimeError("num_attention_heads needs to be divisible by tp")
 
     return config, additional_info
@@ -346,8 +492,10 @@ def run_benchmarks(
     seq_lengths: list[int] = [4096],
     batch_accumulation_per_replicas: list[int] = [1, 2, 4, 8, 16],
     seeds: list[int] = [42],
-    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"), # /iopsstor/scratch/cscs/mbther/hfcache
+    huggingface_cache_path: Path = Path("/scratch/maximilian.boether/hfcache"),
     skip_existing: bool = False,
+    account: str = SLURM_ACCOUNT,
+    shared_dir: Path = SHARED_DIR_DEFAULT,
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
@@ -420,7 +568,8 @@ def run_benchmarks(
 
         run_id = adjusted_config["general"]["run"]
         if run_id not in existing_runs:
-            all_results.append(base_results | run_benchmark(adjusted_config, mode))
+            results = run_benchmark(adjusted_config, mode, account, shared_dir)
+            all_results.append(base_results | results)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
         persist_results_to_json(output_file, all_results)
