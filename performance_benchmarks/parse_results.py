@@ -159,7 +159,7 @@ def parse_results(json_path: Path, output_path: Path):
             "pp",
             "tp",
             "sequence_length",
-            "batch_accumulation_per_replicas",
+            "batch_accumulation_per_replica",
             "micro_batch_size",
             "train_steps",
         ]
