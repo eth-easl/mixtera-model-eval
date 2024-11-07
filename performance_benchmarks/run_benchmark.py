@@ -217,13 +217,13 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path, debug_pa
     num_gpus = dp * tp * pp
     num_nodes = math.ceil(num_gpus / SLURM_GPUS_PER_TASK)
 
-    proc_per_node = 4
+    proc_per_node = SLURM_GPUS_PER_TASK
     if num_gpus < 4 and num_nodes == 1:
         proc_per_node = num_gpus
 
-    if num_nodes > 1 and num_gpus % 4 != 0:
+    if num_nodes > 1 and num_gpus % SLURM_GPUS_PER_TASK != 0:
         raise RuntimeError(
-            f"num_nodes = {num_nodes} > 1 and num_gpus = {num_gpus} not divisible by 4, this is currently not supported."
+            f"num_nodes = {num_nodes} > 1 and num_gpus = {num_gpus} not divisible by {SLURM_GPUS_PER_TASK}, this is currently not supported."
         )
 
     # Save the benchmark configuration in the shared directory
@@ -303,7 +303,7 @@ numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
     proc = subprocess.run(submit_command, capture_output=True, text=True)
     if proc.returncode != 0:
         typer.echo(f"Error submitting job: {proc.stderr}")
-        results = {"success": False}
+        return {"success": False, "job_id": None}
     else:
         typer.echo(f"Job submitted, sbatch output: {proc.stdout}")
         # Extract job ID from sbatch output
@@ -314,66 +314,18 @@ numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
                 break
         if job_id is None:
             typer.echo("Could not determine job ID from sbatch output.")
-            results = {"success": False}
+            return {"success": False, "job_id": None}
         else:
-            # Wait for the job to complete
-            typer.echo(f"Waiting for job {job_id} to complete...")
-            job_complete = False
-            while not job_complete:
-                squeue_cmd = ["squeue", "-j", str(job_id)]
-                squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
-                if squeue_proc.returncode != 0:
-                    typer.echo(f"Error checking job status: {squeue_proc.stderr}")
-                    break
-                elif job_id not in squeue_proc.stdout:
-                    job_complete = True
-                else:
-                    typer.echo(f"Job {job_id} is still running...")
-                    time.sleep(10)
-
-            sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
-            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
-
-            if sacct_proc.returncode != 0:
-                typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
-                return {"success": False}
-            else:
-                sacct_output = sacct_proc.stdout.strip()
-                if not sacct_output:
-                    typer.echo(f"No accounting information found for job {job_id}.")
-                    return {"success": False}
-
-                job_info = sacct_output.split("|")
-                if len(job_info) >= 3:
-                    state = job_info[1]
-                    exit_code = job_info[2]
-
-                    if state != "COMPLETED" or not exit_code.startswith("0:0"):
-                        typer.echo(f"Job {job_id} did not complete successfully.")
-                        typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
-                        typer.echo(f"Please check the logs at {output_file} and {error_file} for details.")
-                        return {"success": False}
-                    else:
-                        typer.echo(f"Job {job_id} completed successfully.")
-
-                        # Collect results from WandB
-                        typer.echo("Collecting data from Weights & Biases.")
-                        results = get_data_from_wandb(config["general"]["project"], config["general"]["run"]) | {
-                            "success": True
-                        }
-                        typer.echo("Data collected")
-                        return results
-                else:
-                    typer.echo(f"Unexpected sacct output: {sacct_output}")
-                    return {"success": False}
-
-    return results
+            return {"success": True, "job_id": job_id}
 
 
-def run_benchmark(config: dict, mode: MachineType, account: str, shared_dir: Path, debug_partition: bool) -> dict:
+def run_benchmark(config: dict, mode: MachineType, account: str, shared_dir: Path, debug_partition: bool):
     if mode in [MachineType.sgsrtx, MachineType.sgsh100]:
-        return run_benchmark_on_sgs(config, mode)
+        # Runs and waits for completion
+        results = run_benchmark_on_sgs(config, mode)
+        return results
     elif mode == MachineType.cscs:
+        # Submits slurm job and return job info (does not wait)
         return run_benchmark_on_cscs(config, account, shared_dir, debug_partition)
 
     typer.echo(f"Error: No implementation yet for mode `{mode}`")
@@ -522,6 +474,69 @@ def persist_results_to_json(output: Path, all_results: list[dict]):
         json.dump(all_results, fout, indent=4)
 
 
+def check_running_jobs(running_jobs, all_results, output_file):
+    updated_running_jobs = []
+    for job in running_jobs:
+        job_id = job["job_id"]
+        base_results = job["base_results"]
+        adjusted_config = job["config"]
+
+        # Check if the job is still running
+        squeue_cmd = ["squeue", "-j", str(job_id)]
+        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
+        if squeue_proc.returncode != 0:
+            typer.echo(f"Error checking job status: {squeue_proc.stderr}")
+            # Consider the job as completed with failure
+            all_results.append(base_results | {"success": False})
+            persist_results_to_json(output_file, all_results)
+            continue
+        elif job_id in squeue_proc.stdout:
+            # Job is still running
+            updated_running_jobs.append(job)
+        else:
+            # Job has completed, check exit status and collect results
+            sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+
+            if sacct_proc.returncode != 0:
+                typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
+                all_results.append(base_results | {"success": False})
+                persist_results_to_json(output_file, all_results)
+                continue
+            else:
+                sacct_output = sacct_proc.stdout.strip()
+                if not sacct_output:
+                    typer.echo(f"No accounting information found for job {job_id}.")
+                    all_results.append(base_results | {"success": False})
+                    persist_results_to_json(output_file, all_results)
+                    continue
+
+                job_info = sacct_output.split("|")
+                if len(job_info) >= 3:
+                    state = job_info[1]
+                    exit_code = job_info[2]
+
+                    if state != "COMPLETED" or not exit_code.startswith("0:0"):
+                        typer.echo(f"Job {job_id} did not complete successfully.")
+                        typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
+                        typer.echo(f"Please check the logs for details.")
+                        all_results.append(base_results | {"success": False})
+                    else:
+                        typer.echo(f"Job {job_id} completed successfully.")
+                        # Collect results from WandB
+                        typer.echo("Collecting data from Weights & Biases.")
+                        results = get_data_from_wandb(
+                            adjusted_config["general"]["project"], adjusted_config["general"]["run"]
+                        ) | {"success": True}
+                        all_results.append(base_results | results)
+                    persist_results_to_json(output_file, all_results)
+                else:
+                    typer.echo(f"Unexpected sacct output: {sacct_output}")
+                    all_results.append(base_results | {"success": False})
+                    persist_results_to_json(output_file, all_results)
+    return updated_running_jobs
+
+
 @app.command()
 def run_benchmarks(
     output_dir: Path,
@@ -539,8 +554,13 @@ def run_benchmarks(
     account: str = SLURM_ACCOUNT,
     shared_dir: Path = SHARED_DIR_DEFAULT,
     debug_partition: bool = False,
+    parallel_slurm_jobs: int = 1,
 ):
     if not validate_user_input(mode, model):
+        raise typer.Exit(code=1)
+
+    if parallel_slurm_jobs < 1:
+        typer.echo("Error: parallel_slurm_jobs must be at least 1.")
         raise typer.Exit(code=1)
 
     output_file = output_dir / f"{benchmark_name}.json"
@@ -591,6 +611,10 @@ def run_benchmarks(
     else:
         typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf.")
 
+    # Lists to keep track of running jobs and their configurations
+    running_jobs = []
+    max_parallel_jobs = parallel_slurm_jobs if mode == MachineType.cscs else 1
+
     for seed, dl_worker, dp, seq_len, bacc in tqdm(
         list(itertools.product(seeds, dl_workers, dps, seq_lengths, batch_accumulation_per_replicas)),
         desc="Processing configurations",
@@ -611,13 +635,42 @@ def run_benchmarks(
 
         run_id = adjusted_config["general"]["run"]
         if run_id not in existing_runs:
-            results = run_benchmark(adjusted_config, mode, account, shared_dir, debug_partition)
-            all_results.append(base_results | results)
+            if mode == MachineType.cscs:
+                while len(running_jobs) >= max_parallel_jobs:
+                    typer.echo(f"Maximum parallel jobs reached ({max_parallel_jobs}). Waiting for a job to finish...")
+                    running_jobs = check_running_jobs(running_jobs, all_results, output_file)
+                    time.sleep(10)
+
+                job_info = run_benchmark(adjusted_config, mode, account, shared_dir, debug_partition)
+                if job_info["success"]:
+                    running_jobs.append(
+                        {
+                            "job_id": job_info["job_id"],
+                            "base_results": base_results,
+                            "config": adjusted_config,
+                        }
+                    )
+                else:
+                    all_results.append(base_results | {"success": False})
+                    persist_results_to_json(output_file, all_results)
+            else:
+                results = run_benchmark(adjusted_config, mode, account, shared_dir, debug_partition)
+                all_results.append(base_results | results)
+                persist_results_to_json(output_file, all_results)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
-        persist_results_to_json(output_file, all_results)
 
         curr_run += 1
+
+    # After all jobs are submitted, wait for remaining jobs to finish
+    if mode == MachineType.cscs and running_jobs:
+        typer.echo("Waiting for all submitted jobs to finish...")
+        while running_jobs:
+            running_jobs = check_running_jobs(running_jobs, all_results, output_file)
+            if running_jobs:
+                time.sleep(10)
+
+    persist_results_to_json(output_file, all_results)
 
     typer.echo("Ran all benchmarks.")
 
