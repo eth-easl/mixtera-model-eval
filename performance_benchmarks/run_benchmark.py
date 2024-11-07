@@ -198,7 +198,7 @@ def run_benchmark_on_sgs(config: dict, mode: MachineType) -> dict:
     return results
 
 
-def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
+def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path, debug_partition: bool) -> dict:
     # Ensure shared directory exists
     shared_dir.mkdir(parents=True, exist_ok=True)
     data_cache_dir = shared_dir / "hf_data"
@@ -237,6 +237,8 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
     output_file = log_dir / f"{job_name}_output.log"
     error_file = log_dir / f"{job_name}_output.err"
 
+    partition = SLURM_PARTITION if not debug_partition else "debug"
+
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --account={account}
@@ -245,7 +247,7 @@ def run_benchmark_on_cscs(config: dict, account: str, shared_dir: Path) -> dict:
 #SBATCH --time={SLURM_TIME}
 #SBATCH --output={output_file}
 #SBATCH --error={error_file}
-#SBATCH --partition={SLURM_PARTITION}
+#SBATCH --partition={partition}
 #SBATCH --no-requeue
 #SBATCH --mem={SLURM_MEM}
 #SBATCH --gpus-per-task={SLURM_GPUS_PER_TASK}
@@ -368,11 +370,11 @@ numactl --membind=0-3 torchrun --nnodes=$SLURM_NNODES \\
     return results
 
 
-def run_benchmark(config: dict, mode: MachineType, account: str, shared_dir: Path) -> dict:
+def run_benchmark(config: dict, mode: MachineType, account: str, shared_dir: Path, debug_partition: bool) -> dict:
     if mode in [MachineType.sgsrtx, MachineType.sgsh100]:
         return run_benchmark_on_sgs(config, mode)
     elif mode == MachineType.cscs:
-        return run_benchmark_on_cscs(config, account, shared_dir)
+        return run_benchmark_on_cscs(config, account, shared_dir, debug_partition)
 
     typer.echo(f"Error: No implementation yet for mode `{mode}`")
     raise typer.Exit(code=1)
@@ -536,6 +538,7 @@ def run_benchmarks(
     skip_existing: bool = False,
     account: str = SLURM_ACCOUNT,
     shared_dir: Path = SHARED_DIR_DEFAULT,
+    debug_partition: bool = False,
 ):
     if not validate_user_input(mode, model):
         raise typer.Exit(code=1)
@@ -608,7 +611,7 @@ def run_benchmarks(
 
         run_id = adjusted_config["general"]["run"]
         if run_id not in existing_runs:
-            results = run_benchmark(adjusted_config, mode, account, shared_dir)
+            results = run_benchmark(adjusted_config, mode, account, shared_dir, debug_partition)
             all_results.append(base_results | results)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
