@@ -99,6 +99,8 @@ def evaluate_checkpoints(
     num_fewshots: list[int],
 ):
     os.environ["HF_DATASETS_TRUST_REMOTE_CODE"] = "1"
+    os.environ["LM_EVAL_USER_PATH"] = str(Path(__file__).parent / "custom_tasks")
+
     for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
         if not save_path.exists():
@@ -142,7 +144,7 @@ def evaluate_checkpoints(
 def convert_and_evaluate(
     checkpoint_dir: Path,
     output_dir: Path,
-    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue,arc_easy",
+    tasks: str = "lambada_openai,hellaswag,openbookqa,winogrande,glue,arc_easy,arc_challenge,mmlu,squadv2",
     data_parallel: int = 1,
     skip_conversion: bool = False,
     seed: int = 1337,
