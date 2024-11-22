@@ -32,14 +32,26 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
         task_names.append(task_name)
 
         task_yaml = {
-            "task": task_name,
-            "dataset_path": "json",
-            "output_type": "loglikelihood_rolling",
-            "data_files": {"train": os.path.join(jsonl_dir, jsonl_file)},
-            "doc_to_text": "{{text}}",
-            "metric_list": [{"metric": "word_perplexity"}, {"metric": "byte_perplexity"}, {"metric": "bits_per_byte"}],
-            "metadata": {"version": 1.0, "description": f"Perplexity evaluation on {jsonl_file}"},
+            'task': task_name,
+            'dataset_path': 'json',
+            'output_type': 'loglikelihood_rolling',
+            'doc_to_text': '{{text}}',
+            'metric_list': [
+                {'metric': 'word_perplexity'},
+                {'metric': 'byte_perplexity'},
+                {'metric': 'bits_per_byte'}
+            ],
+            'metadata': {
+                'version': 1.0,
+                'description': f'Perplexity evaluation on {jsonl_file}'
+            },
+            'dataset_kwargs': {
+                'data_files': {
+                    'train': os.path.join(jsonl_dir, jsonl_file)
+                }
+            }
         }
+
 
         yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}.yaml")
         with open(yaml_file_path, "w+") as f:
