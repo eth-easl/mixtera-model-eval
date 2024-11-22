@@ -1,18 +1,19 @@
 import datasets
-from lm_eval.base import Task, rf
-from lm_eval.metrics import weighted_perplexity, bits_per_byte
+from lm_eval.api.task import PerplexityTask, Task
 import os
 import glob
 from pathlib import Path
 
 
-class BaseCPerplexityTask(Task):
+class BaseCPerplexityTask(PerplexityTask):
     VERSION = 1
 
     def __init__(self, dataset_name, data_file):
-        self.TASK_NAME = dataset_name
-        self.DATA_FILE = data_file
         super().__init__()
+        self.DATASET_PATH = "json"
+        self.DATASET_NAME = None
+        self.dataset_name = dataset_name
+        self.data_file = data_file
 
     def has_validation_docs(self):
         return False
@@ -21,37 +22,19 @@ class BaseCPerplexityTask(Task):
         return True
 
     def test_docs(self):
-        return datasets.load_dataset("json", data_files=self.DATA_FILE)
+        return self.dataset["train"]
+
+    def download(self, **kwargs):
+        # Load your dataset from the specified JSONL file
+        data_files = {"train": self.data_file}
+        self.dataset = self.dataset = self._load_dataset(
+            path=self.DATASET_PATH,
+            name=self.DATASET_NAME,
+            data_files=data_files,
+        )
 
     def doc_to_text(self, doc):
         return doc["text"]
-
-    def construct_requests(self, doc, ctx):
-        return rf.loglikelihood_rolling(ctx)
-
-    def process_results(self, doc, results):
-        loglikelihood, token_count = results
-        text = doc["text"]
-        word_count = len(text.split())
-        byte_count = len(text.encode("utf-8"))
-
-        return {
-            "token_perplexity": (loglikelihood, token_count),
-            "word_perplexity": (loglikelihood, word_count),
-            "byte_perplexity": (loglikelihood, byte_count),
-            "bits_per_byte": (loglikelihood, byte_count),
-        }
-
-    def aggregation(self):
-        return {
-            "token_perplexity": weighted_perplexity,
-            "word_perplexity": weighted_perplexity,
-            "byte_perplexity": weighted_perplexity,
-            "bits_per_byte": bits_per_byte,
-        }
-
-    def higher_is_better(self):
-        return {"token_perplexity": False, "word_perplexity": False, "byte_perplexity": False, "bits_per_byte": False}
 
 
 DATASET_DIR = Path(__file__).parent / "perplexity_data"
@@ -62,10 +45,16 @@ for jsonl_file in jsonl_files:
     dataset_name = os.path.splitext(os.path.basename(jsonl_file))[0]
     class_name = "CPlex_" + dataset_name.replace("-", "_").capitalize()
 
-    def init(self, dataset_name=dataset_name, data_file=jsonl_file):
-        BaseCPerplexityTask.__init__(self, dataset_name, data_file)
-
-    new_class = type(class_name, (BaseCPerplexityTask,), {"__init__": init})
+    new_class = type(
+        class_name,
+        (BaseCPerplexityTask,),
+        {
+            "__init__": lambda self, dataset_name=dataset_name, data_file=jsonl_file: BaseCPerplexityTask.__init__(
+                self, dataset_name, data_file
+            ),
+            "TASK_NAME": dataset_name,
+        },
+    )
     globals()[class_name] = new_class
     task_classes[dataset_name] = new_class
 
@@ -78,7 +67,16 @@ class CPerpAll(Task):
         super().__init__()
         self.subtasks = {}
         for dataset_name, task_class in task_classes.items():
+            # Initialize each subtask
             self.subtasks[dataset_name] = task_class()
+
+    def download(self, **kwargs):
+        # Each subtask needs to download its own data
+        for task in self.subtasks.values():
+            task.download(**kwargs)
+
+    def has_training_docs(self):
+        return any(task.has_training_docs() for task in self.subtasks.values())
 
     def has_validation_docs(self):
         return any(task.has_validation_docs() for task in self.subtasks.values())
@@ -86,36 +84,56 @@ class CPerpAll(Task):
     def has_test_docs(self):
         return any(task.has_test_docs() for task in self.subtasks.values())
 
+    def training_docs(self):
+        for name, task in self.subtasks.items():
+            if task.has_training_docs():
+                for doc in task.training_docs():
+                    doc["_subtask"] = name
+                    yield doc
+
+    def validation_docs(self):
+        for name, task in self.subtasks.items():
+            if task.has_validation_docs():
+                for doc in task.validation_docs():
+                    doc["_subtask"] = name
+                    yield doc
+
     def test_docs(self):
-        # Yield documents with a reference to their subtask
         for name, task in self.subtasks.items():
             if task.has_test_docs():
                 for doc in task.test_docs():
-                    doc["_subtask"] = name  # Mark the document with its subtask name
+                    doc["_subtask"] = name
                     yield doc
 
     def doc_to_text(self, doc):
+        # Redirect to the appropriate subtask's doc_to_text
         subtask = self.subtasks[doc["_subtask"]]
         return subtask.doc_to_text(doc)
 
-    def construct_requests(self, doc, ctx):
+    def construct_requests(self, doc, ctx=None):
+        # Redirect to the appropriate subtask's construct_requests
         subtask = self.subtasks[doc["_subtask"]]
-        return subtask.construct_requests(doc, ctx)
+        return subtask.construct_requests(doc)
 
     def process_results(self, doc, results):
+        # Redirect to the appropriate subtask's process_results
         subtask = self.subtasks[doc["_subtask"]]
-        return {(doc["_subtask"], k): v for k, v in subtask.process_results(doc, results).items()}
+        res = subtask.process_results(doc, results)
+        # Prefix the metric names with the subtask name to prevent collisions
+        return {f"{doc['_subtask']}_{k}": v for k, v in res.items()}
 
     def aggregation(self):
         agg = {}
         for name, task in self.subtasks.items():
-            for k, fn in task.aggregation().items():
-                agg[(name, k)] = fn
+            task_agg = task.aggregation()
+            for k, fn in task_agg.items():
+                agg[f"{name}_{k}"] = fn
         return agg
 
     def higher_is_better(self):
         hib = {}
         for name, task in self.subtasks.items():
-            for k, flag in task.higher_is_better().items():
-                hib[(name, k)] = flag
+            task_hib = task.higher_is_better()
+            for k, flag in task_hib.items():
+                hib[f"{name}_{k}"] = flag
         return hib
