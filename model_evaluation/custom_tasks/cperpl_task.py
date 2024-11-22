@@ -18,7 +18,7 @@ class BaseCPerplexityTask(Task):
         return False
 
     def has_test_docs(self):
-        return False
+        return True
 
     def test_docs(self):
         return datasets.load_dataset("json", data_files=self.DATA_FILE)
@@ -56,6 +56,7 @@ class BaseCPerplexityTask(Task):
 
 DATASET_DIR = Path(__file__).parent / "perplexity_data"
 jsonl_files = glob.glob(os.path.join(DATASET_DIR, "*.jsonl"))
+task_classes = {}
 
 for jsonl_file in jsonl_files:
     dataset_name = os.path.splitext(os.path.basename(jsonl_file))[0]
@@ -66,3 +67,55 @@ for jsonl_file in jsonl_files:
 
     new_class = type(class_name, (BaseCPerplexityTask,), {"__init__": init})
     globals()[class_name] = new_class
+    task_classes[dataset_name] = new_class
+
+
+class CPerpAll(Task):
+    VERSION = 1
+    TASK_NAME = "cperp_all"
+
+    def __init__(self):
+        super().__init__()
+        self.subtasks = {}
+        for dataset_name, task_class in task_classes.items():
+            self.subtasks[dataset_name] = task_class()
+
+    def has_validation_docs(self):
+        return any(task.has_validation_docs() for task in self.subtasks.values())
+
+    def has_test_docs(self):
+        return any(task.has_test_docs() for task in self.subtasks.values())
+
+    def test_docs(self):
+        # Yield documents with a reference to their subtask
+        for name, task in self.subtasks.items():
+            if task.has_test_docs():
+                for doc in task.test_docs():
+                    doc["_subtask"] = name  # Mark the document with its subtask name
+                    yield doc
+
+    def doc_to_text(self, doc):
+        subtask = self.subtasks[doc["_subtask"]]
+        return subtask.doc_to_text(doc)
+
+    def construct_requests(self, doc, ctx):
+        subtask = self.subtasks[doc["_subtask"]]
+        return subtask.construct_requests(doc, ctx)
+
+    def process_results(self, doc, results):
+        subtask = self.subtasks[doc["_subtask"]]
+        return {(doc["_subtask"], k): v for k, v in subtask.process_results(doc, results).items()}
+
+    def aggregation(self):
+        agg = {}
+        for name, task in self.subtasks.items():
+            for k, fn in task.aggregation().items():
+                agg[(name, k)] = fn
+        return agg
+
+    def higher_is_better(self):
+        hib = {}
+        for name, task in self.subtasks.items():
+            for k, flag in task.higher_is_better().items():
+                hib[(name, k)] = flag
+        return hib
