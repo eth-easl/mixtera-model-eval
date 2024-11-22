@@ -125,7 +125,7 @@ def evaluate_checkpoints(
                 "--model",
                 "vllm",
                 "--model_args",
-                f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.9,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
+                f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.8,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
                 "--tasks",
                 tasks,
                 "--num_fewshot",
