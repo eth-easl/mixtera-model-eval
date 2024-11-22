@@ -42,7 +42,7 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
         }
 
         yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}.yaml")
-        with open(yaml_file_path, "w") as f:
+        with open(yaml_file_path, "w+") as f:
             yaml.dump(task_yaml, f)
 
     return task_names
@@ -195,9 +195,9 @@ def convert_and_evaluate(
     yaml_path = Path(__file__).parent / "yaml_temp"
     if yaml_path.exists():
         shutil.rmtree(yaml_path)
+    yaml_path.mkdir(parents=True)
     if perp_jsonls.exists() and perp_jsonls.is_dir():
         task_names = generate_yaml_tasks(perp_jsonls, yaml_path)
-    perp_jsonls.mkdir(parents=True)
 
     ### Get all available checkpoints
     checkpoints = list_checkpoints(checkpoint_dir)
