@@ -36,18 +36,39 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
             "dataset_path": "json",
             "output_type": "loglikelihood_rolling",
             "test_split": "train",
-            "doc_to_text": "{{text}}",
+            "doc_to_target": "{{text}}",
+            "doc_to_text": "",
             "metric_list": [
+                #{"metric": "perplexity", "aggregation": "perplexity", "higher_is_better": False},
                 {"metric": "word_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "byte_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "bits_per_byte", "aggregation": "bits_per_byte", "higher_is_better": False},
             ],
             "metadata": {"version": 1.0, "description": f"Perplexity evaluation on {jsonl_file}"},
             "dataset_kwargs": {"data_files": {"train": os.path.join(jsonl_dir, jsonl_file)}},
-            "max_num_fewshot": 0,
+            "num_fewshot": 0,
         }
 
         yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}.yaml")
+        with open(yaml_file_path, "w+") as f:
+            yaml.dump(task_yaml, f)
+
+        task_yaml = {
+            "task": f"{task_name}_ppl",
+            "dataset_path": "json",
+            "output_type": "loglikelihood",
+            "test_split": "train",
+            "doc_to_target": "{{text}}",
+            "doc_to_text": "",
+            "metric_list": [
+                {"metric": "perplexity", "aggregation": "perplexity", "higher_is_better": False},
+            ],
+            "metadata": {"version": 1.0, "description": f"Perplexity evaluation on {jsonl_file}"},
+            "dataset_kwargs": {"data_files": {"train": os.path.join(jsonl_dir, jsonl_file)}},
+            "num_fewshot": 0,
+        }
+
+        yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}_ppl.yaml")
         with open(yaml_file_path, "w+") as f:
             yaml.dump(task_yaml, f)
 
@@ -164,7 +185,7 @@ def evaluate_checkpoints(
                 "--model",
                 "vllm",
                 "--model_args",
-                f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.8,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
+                f"pretrained={save_path},trust_remote_code=True,tensor_parallel_size={tp},dtype=auto,gpu_memory_utilization=0.7,data_parallel_size={data_parallel},tokenizer={tokenizer_name},seed={seed}",
                 "--tasks",
                 tasks,
                 "--num_fewshot",
