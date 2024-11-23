@@ -30,6 +30,7 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
     for jsonl_file in jsonl_files:
         task_name = os.path.splitext(jsonl_file)[0]
         task_names.append(task_name)
+        task_names.append(f"{task_name}_ppl")
 
         task_yaml = {
             "task": task_name,
