@@ -121,6 +121,9 @@ def main():
     for pile_set_name, count in category_counts.items():
         print(f"{pile_set_name}: {count} samples")
 
+    with open(os.path.join(output_dir, "statistics.json"), "w+", encoding="utf-8") as fp:
+        json.dump(category_counts, fp)
+
 
 if __name__ == "__main__":
     main()
