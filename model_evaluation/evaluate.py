@@ -39,10 +39,14 @@ def check_nanotron_availability():
 
 def write_task_utils(yaml_output_dir, model_name_or_path):
     custom_code = f"""
+import transformers
+tokenizer = None
+
 def token_process_results(doc, results):
-    import transformers
+    global tokenizer
+    if tokenizer is None:
+        tokenizer = transformers.AutoTokenizer.from_pretrained("{model_name_or_path}", use_fast=False)
     (loglikelihood,) = results
-    tokenizer = transformers.AutoTokenizer.from_pretrained("{model_name_or_path}", use_fast=False)
     tokens = tokenizer(doc.get("text", doc))["input_ids"]
     num_tokens = len(tokens)
     _words = len(doc.get("text", doc).split())
@@ -54,6 +58,7 @@ def token_process_results(doc, results):
         "bits_per_byte": (loglikelihood, _bytes),
     }}
 """
+
     utils_path = os.path.join(yaml_output_dir, "utils.py")
     with open(utils_path, "w+") as f:
         f.write(custom_code)
