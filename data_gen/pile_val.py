@@ -118,12 +118,15 @@ def main():
 
     # Print counts for each category
     print("\nSamples written for each category:")
-    for pile_set_name, count in category_counts.copy().items():
+    statistics_by_file = {}
+    for pile_set_name, count in category_counts.items():
         print(f"{pile_set_name}: {count} samples")
-        category_counts[PILE_SET_NAME_TO_FILENAME[pile_set_name]] = count
+        statistics_by_file[PILE_SET_NAME_TO_FILENAME[pile_set_name]] = count
 
-    with open(os.path.join(output_dir, "statistics.json"), "w+", encoding="utf-8") as fp:
+    with open(os.path.join(output_dir, "statistics_by_group.json"), "w+", encoding="utf-8") as fp:
         json.dump(category_counts, fp)
+    with open(os.path.join(output_dir, "statistics_by_file.json"), "w+", encoding="utf-8") as fp:
+        json.dump(statistics_by_file, fp)
 
 
 if __name__ == "__main__":
