@@ -10,6 +10,19 @@ import subprocess
 import shutil
 import tempfile
 
+
+class TaggedStr(str):
+    pass
+
+
+# We need this to print the !function utils.xyz thing for lm_eval_harness without quotation marks
+def tagged_str_presenter(dumper, data):
+    return dumper.represent_scalar("!function", data)
+
+
+yaml.add_representer(TaggedStr, tagged_str_presenter)
+
+
 app = typer.Typer()
 
 
@@ -23,11 +36,11 @@ def check_nanotron_availability():
         )
         raise typer.Exit(code=1)
 
-def create_custom_module(model_name_or_path):
-    custom_code = f"""
-import transformers
 
-def process_results(doc, results):
+def write_task_utils(yaml_output_dir, model_name_or_path):
+    custom_code = f"""
+def token_process_results(doc, results):
+    import transformers
     (loglikelihood,) = results
     tokenizer = transformers.AutoTokenizer.from_pretrained("{model_name_or_path}", use_fast=False)
     tokens = tokenizer(doc.get("text", doc))["input_ids"]
@@ -41,30 +54,12 @@ def process_results(doc, results):
         "bits_per_byte": (loglikelihood, _bytes),
     }}
 """
-
-    temp_dir = tempfile.gettempdir()
-    module_name = "process_perplexity"
-
-    # Create the package directory
-    package_dir = os.path.join(temp_dir, module_name)
-    os.makedirs(package_dir, exist_ok=True)
-
-    # Create an empty __init__.py file to make it a package
-    init_file_path = os.path.join(package_dir, '__init__.py')
-    with open(init_file_path, "w") as f:
-        pass  # Just create an empty __init__.py file
-
-    # Write the custom code into process_results.py inside the package
-    module_file_path = os.path.join(package_dir, 'process_results.py')
-    with open(module_file_path, "w") as f:
+    utils_path = os.path.join(yaml_output_dir, "utils.py")
+    with open(utils_path, "w+") as f:
         f.write(custom_code)
 
-    typer.echo(f"Custom module created at {package_dir}")
 
-    return module_name, temp_dir
-
-
-def generate_yaml_tasks(jsonl_dir, yaml_output_dir, module_name):
+def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
     task_names = []
 
     jsonl_files = [f for f in os.listdir(jsonl_dir) if f.endswith(".jsonl")]
@@ -79,7 +74,7 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir, module_name):
             "test_split": "train",
             "doc_to_target": "{{text}}",
             "doc_to_text": "",
-            "process_results": f"!function {module_name}.process_results",
+            "process_results": TaggedStr("utils.token_process_results"),
             "metric_list": [
                 {"metric": "token_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "word_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
@@ -178,13 +173,9 @@ def evaluate_checkpoints(
     num_fewshots: list[int],
     include_yaml_dir: Path,
     additional_task_names: list[str],
-    module_dir: str | None
 ):
     os.environ["HF_DATASETS_TRUST_REMOTE_CODE"] = "1"
     new_env = os.environ.copy()
-    if module_dir is not None and module_dir != "":
-        pythonpath = new_env.get("PYTHONPATH", "")
-        new_env["PYTHONPATH"] = f"{module_dir}:{pythonpath}"
 
     for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
@@ -196,6 +187,10 @@ def evaluate_checkpoints(
         parallelism_config = get_parallelism_config(checkpoint)
         tp = parallelism_config.get("tp", 1)
         pp = parallelism_config.get("pp", 1)
+
+        if include_yaml_dir is not None and include_yaml_dir.exists():
+            write_task_utils(include_yaml_dir, tokenizer_name)
+            typer.echo(f"Wrote utils file to {include_yaml_dir} for tokenizer {tokenizer_name}")
 
         if pp > 1:
             typer.echo(f"Error: lm_eval currently only supports pp = 1 with VLLM, but pp = {pp}!")
@@ -252,8 +247,7 @@ def convert_and_evaluate(
         shutil.rmtree(yaml_path)
     yaml_path.mkdir(parents=True)
     if perp_jsonls.exists() and perp_jsonls.is_dir():
-        module_name, module_dir = create_custom_module("meta-llama/Llama-3.2-1B") # TODO base this con checkpoint
-        task_names = generate_yaml_tasks(perp_jsonls, yaml_path, module_name)
+        task_names = generate_yaml_tasks(perp_jsonls, yaml_path)
 
     ### Get all available checkpoints
     checkpoints = list_checkpoints(checkpoint_dir)
@@ -288,7 +282,7 @@ def convert_and_evaluate(
 
     ### Evaluate the checkpoints
     evaluate_checkpoints(
-        hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed, num_fewshots, yaml_path, task_names, module_dir
+        hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed, num_fewshots, yaml_path, task_names
     )
 
 
