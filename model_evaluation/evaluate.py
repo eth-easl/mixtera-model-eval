@@ -8,6 +8,7 @@ import os
 import yaml
 import subprocess
 import shutil
+import tempfile
 
 app = typer.Typer()
 
@@ -22,15 +23,46 @@ def check_nanotron_availability():
         )
         raise typer.Exit(code=1)
 
+def create_custom_module(model_name_or_path):
+    # Define the custom process_results function code as a string
+    custom_code = f"""
+import transformers
 
-def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
+def process_results(doc, results):
+    (loglikelihood,) = results
+    tokenizer = transformers.AutoTokenizer.from_pretrained("{model_name_or_path}", use_fast=False)
+    tokens = tokenizer(doc.get("text", doc))["input_ids"]
+    num_tokens = len(tokens)
+    # For word and byte counts
+    _words = len(doc.get("text", doc).split())
+    _bytes = len(doc.get("text", doc).encode("utf-8"))
+    return {{
+        "token_perplexity": (loglikelihood, num_tokens),
+        "word_perplexity": (loglikelihood, _words),
+        "byte_perplexity": (loglikelihood, _bytes),
+        "bits_per_byte": (loglikelihood, _bytes),
+    }}
+"""
+
+    temp_dir = tempfile.gettempdir()
+    module_name = "process_perplexity"
+    module_path = os.path.join(temp_dir, f"{module_name}.py")
+
+    with open(module_path, "w") as f:
+        f.write(custom_code)
+
+    print(f"Custom module created at {module_path}")
+
+    return module_name, temp_dir
+
+
+def generate_yaml_tasks(jsonl_dir, yaml_output_dir, module_name):
     task_names = []
 
     jsonl_files = [f for f in os.listdir(jsonl_dir) if f.endswith(".jsonl")]
     for jsonl_file in jsonl_files:
         task_name = os.path.splitext(jsonl_file)[0]
         task_names.append(task_name)
-        task_names.append(f"{task_name}_ppl")
 
         task_yaml = {
             "task": task_name,
@@ -39,8 +71,9 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
             "test_split": "train",
             "doc_to_target": "{{text}}",
             "doc_to_text": "",
+            "process_results": f"!function {module_name}.process_results",
             "metric_list": [
-                #{"metric": "perplexity", "aggregation": "perplexity", "higher_is_better": False},
+                {"metric": "token_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "word_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "byte_perplexity", "aggregation": "weighted_perplexity", "higher_is_better": False},
                 {"metric": "bits_per_byte", "aggregation": "bits_per_byte", "higher_is_better": False},
@@ -51,25 +84,6 @@ def generate_yaml_tasks(jsonl_dir, yaml_output_dir):
         }
 
         yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}.yaml")
-        with open(yaml_file_path, "w+") as f:
-            yaml.dump(task_yaml, f)
-
-        task_yaml = {
-            "task": f"{task_name}_ppl",
-            "dataset_path": "json",
-            "output_type": "loglikelihood",
-            "test_split": "train",
-            "doc_to_target": "{{text}}",
-            "doc_to_text": "",
-            "metric_list": [
-                {"metric": "perplexity", "aggregation": "perplexity", "higher_is_better": False},
-            ],
-            "metadata": {"version": 1.0, "description": f"Perplexity evaluation on {jsonl_file}"},
-            "dataset_kwargs": {"data_files": {"train": os.path.join(jsonl_dir, jsonl_file)}},
-            "num_fewshot": 0,
-        }
-
-        yaml_file_path = os.path.join(yaml_output_dir, f"{task_name}_ppl.yaml")
         with open(yaml_file_path, "w+") as f:
             yaml.dump(task_yaml, f)
 
@@ -156,8 +170,13 @@ def evaluate_checkpoints(
     num_fewshots: list[int],
     include_yaml_dir: Path,
     additional_task_names: list[str],
+    module_dir: str | None
 ):
     os.environ["HF_DATASETS_TRUST_REMOTE_CODE"] = "1"
+    new_env = os.environ.copy()
+    if module_dir is not None and module_dir != "":
+        pythonpath = new_env.get("PYTHONPATH", "")
+        new_env["PYTHONPATH"] = f"{module_dir}:{pythonpath}"
 
     for _, checkpoint in tqdm(selected_checkpoints.items(), desc="Evaluating Models"):
         save_path = hf_output_dir / f"{checkpoint.name}-hf"
@@ -198,7 +217,7 @@ def evaluate_checkpoints(
                 "--output_path",
                 str(fewshot_output_dir / f"results_{checkpoint.name}"),
             ]
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=new_env)
 
     typer.echo("Successfully ran conversion and evaluation. Use `parse_results.py` to convert the data into a csv.")
 
@@ -225,7 +244,8 @@ def convert_and_evaluate(
         shutil.rmtree(yaml_path)
     yaml_path.mkdir(parents=True)
     if perp_jsonls.exists() and perp_jsonls.is_dir():
-        task_names = generate_yaml_tasks(perp_jsonls, yaml_path)
+        module_name, module_dir = create_custom_module("meta-llama/Llama-3.2-1B") # TODO base this con checkpoint
+        task_names = generate_yaml_tasks(perp_jsonls, yaml_path, module_name)
 
     ### Get all available checkpoints
     checkpoints = list_checkpoints(checkpoint_dir)
@@ -260,7 +280,7 @@ def convert_and_evaluate(
 
     ### Evaluate the checkpoints
     evaluate_checkpoints(
-        hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed, num_fewshots, yaml_path, task_names
+        hf_output_dir, output_dir, selected_checkpoints, tasks, data_parallel, seed, num_fewshots, yaml_path, task_names, module_dir
     )
 
 
