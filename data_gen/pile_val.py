@@ -64,7 +64,7 @@ def main():
     # Dictionary to keep file handles for each component
     file_handles = {}
     # Dictionary to keep count of lines for each category
-    category_counts = {key: {"count": 0, "name": name} for key, name in PILE_SET_NAME_TO_FILENAME.items()}
+    category_counts = {key: 0 for key in PILE_SET_NAME_TO_FILENAME.keys()}
 
     # First, count total number of lines for progress bar
     total_lines = count_total_lines(input_path)
@@ -109,7 +109,7 @@ def main():
                     file_handles[output_filename].write(line + "\n")
 
                     # Update category count
-                    category_counts[pile_set_name]["count"] += 1
+                    category_counts[pile_set_name] += 1
 
     finally:
         # Close all file handles
@@ -118,8 +118,9 @@ def main():
 
     # Print counts for each category
     print("\nSamples written for each category:")
-    for pile_set_name, count_dict in category_counts.items():
-        print(f"{pile_set_name}: {count_dict['count']} samples")
+    for pile_set_name, count in category_counts.copy().items():
+        print(f"{pile_set_name}: {count} samples")
+        category_counts[PILE_SET_NAME_TO_FILENAME[pile_set_name]] = count
 
     with open(os.path.join(output_dir, "statistics.json"), "w+", encoding="utf-8") as fp:
         json.dump(category_counts, fp)
