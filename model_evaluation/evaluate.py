@@ -24,7 +24,6 @@ def check_nanotron_availability():
         raise typer.Exit(code=1)
 
 def create_custom_module(model_name_or_path):
-    # Define the custom process_results function code as a string
     custom_code = f"""
 import transformers
 
@@ -33,7 +32,6 @@ def process_results(doc, results):
     tokenizer = transformers.AutoTokenizer.from_pretrained("{model_name_or_path}", use_fast=False)
     tokens = tokenizer(doc.get("text", doc))["input_ids"]
     num_tokens = len(tokens)
-    # For word and byte counts
     _words = len(doc.get("text", doc).split())
     _bytes = len(doc.get("text", doc).encode("utf-8"))
     return {{
@@ -46,12 +44,22 @@ def process_results(doc, results):
 
     temp_dir = tempfile.gettempdir()
     module_name = "process_perplexity"
-    module_path = os.path.join(temp_dir, f"{module_name}.py")
 
-    with open(module_path, "w") as f:
+    # Create the package directory
+    package_dir = os.path.join(temp_dir, module_name)
+    os.makedirs(package_dir, exist_ok=True)
+
+    # Create an empty __init__.py file to make it a package
+    init_file_path = os.path.join(package_dir, '__init__.py')
+    with open(init_file_path, "w") as f:
+        pass  # Just create an empty __init__.py file
+
+    # Write the custom code into process_results.py inside the package
+    module_file_path = os.path.join(package_dir, 'process_results.py')
+    with open(module_file_path, "w") as f:
         f.write(custom_code)
 
-    print(f"Custom module created at {module_path}")
+    typer.echo(f"Custom module created at {package_dir}")
 
     return module_name, temp_dir
 
