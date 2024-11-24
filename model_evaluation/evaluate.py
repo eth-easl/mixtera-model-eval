@@ -251,8 +251,9 @@ def convert_and_evaluate(
     if yaml_path.exists():
         shutil.rmtree(yaml_path)
     yaml_path.mkdir(parents=True)
+    task_names = []
     if perp_jsonls.exists() and perp_jsonls.is_dir():
-        task_names = generate_yaml_tasks(perp_jsonls, yaml_path)
+        task_names = generate_yaml_tasks(perp_jsonls, yaml_path)        
 
     ### Get all available checkpoints
     checkpoints = list_checkpoints(checkpoint_dir)
