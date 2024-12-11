@@ -76,8 +76,8 @@ def main():
             "Note: This requires enough memory to hold all texts for each category.\n"
             "Ensure your system has sufficient memory."
         )
-        # Dictionary to accumulate texts per category
-        merged_samples = {key: "" for key in PILE_SET_NAME_TO_FILENAME.keys()}
+        # Dictionary to accumulate texts per category using lists
+        merged_samples = {key: [] for key in PILE_SET_NAME_TO_FILENAME.keys()}
     else:
         # Dictionary to keep file handles for each component
         file_handles = {}
@@ -118,8 +118,8 @@ def main():
                     category_counts[pile_set_name] += 1
 
                     if args.merged:
-                        # Accumulate text in memory
-                        merged_samples[pile_set_name] += text + "\n"
+                        # Accumulate text in a list for efficient concatenation
+                        merged_samples[pile_set_name].append(text)
                     else:
                         output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
                         output_path = os.path.join(output_dir, output_filename + ".jsonl")
@@ -144,14 +144,15 @@ def main():
     if args.merged:
         # Write the merged samples to respective output files
         print("\nWriting merged samples to output files...")
-        for pile_set_name, accumulated_text in merged_samples.items():
+        for pile_set_name, texts in merged_samples.items():
             output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
             output_path = os.path.join(output_dir, output_filename + ".jsonl")
-            if accumulated_text.strip():
+            if texts:
                 try:
+                    accumulated_text = "\n".join(texts)
                     with open(output_path, "w", encoding="utf-8") as f_out:
                         merged_sample = {
-                            "text": accumulated_text.strip(),
+                            "text": accumulated_text,
                             "meta": {
                                 "pile_set_name": pile_set_name,
                                 "num_samples": category_counts[pile_set_name],
