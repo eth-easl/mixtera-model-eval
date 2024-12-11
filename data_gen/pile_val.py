@@ -40,6 +40,12 @@ def parse_arguments():
     parser.add_argument(
         "-o", "--output-dir", default=".", help="Output directory for the component files (default: current directory)"
     )
+    parser.add_argument(
+        "--merged",
+        action="store_true",
+        default=False,
+        help="If set, merge all samples per category into a single sample (default: False)",
+    )
     return parser.parse_args()
 
 
@@ -61,10 +67,20 @@ def main():
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # Dictionary to keep file handles for each component
-    file_handles = {}
     # Dictionary to keep count of lines for each category
     category_counts = {key: 0 for key in PILE_SET_NAME_TO_FILENAME.keys()}
+
+    if args.merged:
+        print("Merging all samples for each category into a single sample per file.")
+        print(
+            "Note: This requires enough memory to hold all texts for each category.\n"
+            "Ensure your system has sufficient memory."
+        )
+        # Dictionary to accumulate texts per category
+        merged_samples = {key: "" for key in PILE_SET_NAME_TO_FILENAME.keys()}
+    else:
+        # Dictionary to keep file handles for each component
+        file_handles = {}
 
     # First, count total number of lines for progress bar
     total_lines = count_total_lines(input_path)
@@ -96,29 +112,57 @@ def main():
 
                     text = data["text"].strip()
                     if not text:
-                        continue # skip empty texts
-
-                    output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
-                    output_path = os.path.join(output_dir, output_filename + ".jsonl")
-
-                    if output_filename not in file_handles:
-                        try:
-                            # Open the file in append mode to write entries
-                            file_handles[output_filename] = open(output_path, "a", encoding="utf-8")
-                        except IOError as e:
-                            print(f"Error opening file '{output_path}': {e}", file=sys.stderr)
-                            sys.exit(1)
-
-                    # Write the original line to the appropriate output file
-                    file_handles[output_filename].write(line + "\n")
+                        continue  # Skip empty texts
 
                     # Update category count
                     category_counts[pile_set_name] += 1
 
+                    if args.merged:
+                        # Accumulate text in memory
+                        merged_samples[pile_set_name] += text + "\n"
+                    else:
+                        output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
+                        output_path = os.path.join(output_dir, output_filename + ".jsonl")
+
+                        if output_filename not in file_handles:
+                            try:
+                                # Open the file in append mode to write entries
+                                file_handles[output_filename] = open(output_path, "a", encoding="utf-8")
+                            except IOError as e:
+                                print(f"Error opening file '{output_path}': {e}", file=sys.stderr)
+                                sys.exit(1)
+
+                        # Write the original line to the appropriate output file
+                        file_handles[output_filename].write(line + "\n")
+
     finally:
-        # Close all file handles
-        for fh in file_handles.values():
-            fh.close()
+        if not args.merged:
+            # Close all file handles
+            for fh in file_handles.values():
+                fh.close()
+
+    if args.merged:
+        # Write the merged samples to respective output files
+        print("\nWriting merged samples to output files...")
+        for pile_set_name, accumulated_text in merged_samples.items():
+            output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
+            output_path = os.path.join(output_dir, output_filename + ".jsonl")
+            if accumulated_text.strip():
+                try:
+                    with open(output_path, "w", encoding="utf-8") as f_out:
+                        merged_sample = {
+                            "text": accumulated_text.strip(),
+                            "meta": {
+                                "pile_set_name": pile_set_name,
+                                "num_samples": category_counts[pile_set_name],
+                            },
+                        }
+                        f_out.write(json.dumps(merged_sample) + "\n")
+                except IOError as e:
+                    print(f"Error writing to file '{output_path}': {e}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(f"No text accumulated for pile_set_name '{pile_set_name}', skipping file.")
 
     # Print counts for each category
     print("\nSamples written for each category:")
