@@ -94,6 +94,10 @@ def main():
                         print(f"Unknown pile_set_name '{pile_set_name}' on line {line_number}", file=sys.stderr)
                         sys.exit(1)
 
+                    text = data["text"].strip()
+                    if not text:
+                        continue # skip empty texts
+
                     output_filename = PILE_SET_NAME_TO_FILENAME[pile_set_name]
                     output_path = os.path.join(output_dir, output_filename + ".jsonl")
 
