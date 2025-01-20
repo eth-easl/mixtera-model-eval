@@ -132,6 +132,7 @@ def persist_results_to_json(output: Path, all_results: list[dict]):
 def adjust_base_config(
     base_config: dict,
     dump_folder: str,
+    tokenizer: str,
     dataset_path: Path,
     bm_identifier: str,
     curr_run: int,
@@ -162,7 +163,7 @@ def adjust_base_config(
     config["training"]["data_parallel_replicate_degree"] = dp
     config["training"]["data_parallel_shard_degree"] = -1
 
-    config["training"]["tokenizer"] = MODEL_MICROBATCH[model]
+    config["training"]["tokenizer"] = tokenizer
 
     # Set microbatch size
     config["training"]["batch_size"] = MODEL_MICROBATCH[model]
@@ -454,6 +455,7 @@ def run_benchmarks(
     shared_dir: Path = SHARED_DIR_DEFAULT,
     debug_partition: bool = False,
     parallel_slurm_jobs: int = 1,
+    tokenizer: str = "EleutherAI/gpt-neox-20b"
 ):
     if parallel_slurm_jobs < 1:
         typer.echo("Error: parallel_slurm_jobs must be at least 1.")
@@ -519,7 +521,7 @@ def run_benchmarks(
         desc="Processing configurations",
     ):
         adjusted_config, additional_info = adjust_base_config(
-            base_config, shared_dir, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader
+            base_config, shared_dir, tokenizer, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader
         )
         base_results = {
             "config": adjusted_config,
