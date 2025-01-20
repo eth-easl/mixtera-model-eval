@@ -118,7 +118,7 @@ def load_yaml_from_file(path: str | Path):
             raise typer.Exit(code=1) from exc
 
 def load_toml_from_file(path: str | Path):
-    with open(path) as stream:
+    with open(path, "rb") as stream:
         try:
             return tomllib.load(stream)
         except tomllib.TOMLDecodeError as exc:
@@ -313,7 +313,7 @@ def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug
 
     # Save the benchmark configuration in the shared directory
     bm_config_path = shared_dir / f"{job_name}_benchmark.toml"
-    with open(bm_config_path, "w+") as f:
+    with open(bm_config_path, "w+b") as f:
         tomllib.dump(config, f)
 
     # Paths for logs
