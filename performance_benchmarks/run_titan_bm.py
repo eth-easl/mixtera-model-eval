@@ -417,7 +417,7 @@ def run_benchmarks(
     dataset_path: Path,
     dl_workers: list[int] = [0, 1, 2, 4],
     dp_replicate_deg: list[int] = [1, 2, 4, 12], # shard degree = ngpus / dp_replicate_deg
-    ngpus = [1, 4, 8, 12, 24], # each node has 4 GPUs
+    ngpus: list[int] = [1, 4, 8, 12, 24], # each node has 4 GPUs
     seq_lengths: list[int] = [1024, 2048],
     seeds: list[int] = [42],
     dataloaders: list[Dataloader] = [Dataloader.hf, Dataloader.hf_stream],
