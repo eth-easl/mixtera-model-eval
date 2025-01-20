@@ -156,11 +156,13 @@ def adjust_base_config(
     config["job"]["description"] = f"{bm_identifier}/{run_name}"
     config["job"]["dump_folder"] = f"{dump_folder}/{run_name}_dumpdir"
 
-    config["model"]["flavor"] = str(model)
+    config["model"]["flavor"] = model.name
 
     # Set number of dp nodes
     config["training"]["data_parallel_replicate_degree"] = dp
     config["training"]["data_parallel_shard_degree"] = -1
+
+    config["training"]["tokenizer"] = MODEL_MICROBATCH[model]
 
     # Set microbatch size
     config["training"]["batch_size"] = MODEL_MICROBATCH[model]
