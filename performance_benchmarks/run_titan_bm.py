@@ -471,7 +471,7 @@ def run_benchmarks(
             if _run_id is not None and _run_id != "":
                 existing_runs.add(_run_id)
 
-    base_config = load_base_config(model)
+    base_config = load_base_config()
     bm_identifier = "dataloader_benchmark_script"
     curr_run = 0
 
