@@ -56,6 +56,7 @@ SLURM_GPUS_PER_TASK = 4
 SHARED_DIR_DEFAULT = Path(f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/torchtitan-benchmarks")
 CONTAINER_ENVIRONMENT = f"/users/mbther/.edf/torchtitan.toml"
 TORCHTITAN_PATH = f"/users/{os.environ.get('USER')}/torchtitan-mixtera"
+MIXTERA_PATH = f"/users/{os.environ.get('USER')}/mixtera"
 
 def ask_to_continue():
     response = input("Do you want to continue? (yes/no) [yes]: ").strip().lower()
@@ -369,11 +370,32 @@ set -eo pipefail
 {master_setup}
 
 srun -ul --container-writable --environment={CONTAINER_ENVIRONMENT} bash -c "
+# Install torchtitan
 pushd {TORCHTITAN_PATH}
 pip install -e .
 popd
 
-# TODO: install mixtera when we support it
+# Install mixtera
+pushd {MIXTERA_PATH}
+n=0
+
+until [ \$n -ge 5 ]
+do
+   if pip install -e .; then
+      echo 'pip install succeeded after try ('\$n')'
+      break
+   else
+      n=\$((\$n+1))
+      echo 'pip install failed, retrying ('\$n')'
+      sleep 1
+   fi
+done
+if [ \$n -ge 5 ]; then
+   echo 'pip install failed after 5 retries'
+   exit 1
+fi
+
+popd
 
 numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "todo" --mixtera.port 1234
 
