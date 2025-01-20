@@ -313,7 +313,7 @@ def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug
 
     # Save the benchmark configuration in the shared directory
     bm_config_path = shared_dir / f"{job_name}_benchmark.toml"
-    with open(bm_config_path, "w+b") as f:
+    with open(bm_config_path, "w+") as f:
         toml.dump(config, f)
 
     # Paths for logs
