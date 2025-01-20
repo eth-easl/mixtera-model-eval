@@ -131,6 +131,7 @@ def persist_results_to_json(output: Path, all_results: list[dict]):
 
 def adjust_base_config(
     base_config: dict,
+    dump_folder: str,
     dataset_path: Path,
     bm_identifier: str,
     curr_run: int,
@@ -152,13 +153,14 @@ def adjust_base_config(
     config["metrics"]["wandb_run_name"] = run_name
     config["mixtera"]["job_id"] = run_name
     config["metrics"]["wandb_project"] = bm_identifier
-    config["job"]["description"] = bm_identifier
+    config["job"]["description"] = f"{bm_identifier}/{run_name}"
+    config["job"]["dump_folder"] = f"{dump_folder}/{run_name}_dumpdir"
 
     config["model"]["flavor"] = str(model)
 
     # Set number of dp nodes
     config["training"]["data_parallel_replicate_degree"] = dp
-    config["training"]["data_parallel_shard_degree"] = "-1"
+    config["training"]["data_parallel_shard_degree"] = -1
 
     # Set microbatch size
     config["training"]["batch_size"] = MODEL_MICROBATCH[model]
@@ -343,7 +345,6 @@ def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path
 
     env_vars = f"""
 export OMP_NUM_THREADS={OMP_NUM_THREADS}
-export CUDA_DEVICE_MAX_CONNECTIONS=1
 export WANDB_DIR={shared_dir}/wandb
 export WANDB_API_KEY={os.environ.get('WANDB_API_KEY', '')}
 export HF_TOKEN={os.environ.get('HF_TOKEN', '')}
@@ -516,7 +517,7 @@ def run_benchmarks(
         desc="Processing configurations",
     ):
         adjusted_config, additional_info = adjust_base_config(
-            base_config, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader
+            base_config, shared_dir, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader
         )
         base_results = {
             "config": adjusted_config,
