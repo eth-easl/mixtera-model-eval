@@ -51,7 +51,6 @@ OMP_NUM_THREADS = "64"
 
 SLURM_PARTITION = "normal"
 SLURM_TIME = "00:15:00"
-SLURM_ACCOUNT = "a06"
 SLURM_GPUS_PER_TASK = 4
 
 SHARED_DIR_DEFAULT = Path(f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/torchtitan-benchmarks")
@@ -283,7 +282,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
                     persist_results_to_json(output_file, all_results)
     return updated_running_jobs
 
-def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug_partition: bool) -> dict:
+def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path, debug_partition: bool) -> dict:
     # Ensure shared directory exists
     shared_dir.mkdir(parents=True, exist_ok=True)
     data_cache_dir = shared_dir / "hf_data"
@@ -328,7 +327,6 @@ def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug
 
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-#SBATCH --account={account}
 #SBATCH --nodes={num_nodes}
 #SBATCH --ntasks-per-node=1
 #SBATCH --time={SLURM_TIME}
@@ -338,6 +336,9 @@ def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug
 #SBATCH --no-requeue
 #SBATCH --gpus-per-task={SLURM_GPUS_PER_TASK}
 """
+    
+    if account is not None and account != "":
+        sbatch_header += f"\n#SBATCH --account={account}"
 
     env_vars = f"""
 export OMP_NUM_THREADS={OMP_NUM_THREADS}
@@ -374,7 +375,7 @@ popd
 
 # TODO: install mixtera when we support it
 
-numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={SLURM_GPUS_PER_TASK} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "todo" --mixtera.port 1234
+numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "todo" --mixtera.port 1234
 
 "
 """
@@ -424,7 +425,7 @@ def run_benchmarks(
     mixtera_server_path: str = "", # For now, we need to set up the Mixtera server directory manually
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
-    account: str = SLURM_ACCOUNT,
+    account: str | None = None,
     shared_dir: Path = SHARED_DIR_DEFAULT,
     debug_partition: bool = False,
     parallel_slurm_jobs: int = 1,
