@@ -209,7 +209,7 @@ def adjust_base_config(
         "skip_reason": "",
     }
 
-    if dp >= ngpu:
+    if dp >= ngpu and dp > 1:
         additional_info["skipped"] = True
         additional_info["skip_reason"] = f"dp = {dp} >= ngpu = {ngpu}" 
         # we cannot have dp == ngpu because that deactivates FSDP, which deactivates bfloat16
