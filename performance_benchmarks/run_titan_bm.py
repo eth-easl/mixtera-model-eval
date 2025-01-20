@@ -178,7 +178,6 @@ def adjust_base_config(
 
     # Set dataset path
     config["training"]["dataset"] = str(dataset_path)
-    config["training"]["dataset_path"] = str(dataset_path)
 
     # Handle dataloader
     if dataloader == Dataloader.hf:
