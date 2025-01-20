@@ -505,7 +505,7 @@ def run_benchmarks(
             all_results.append(base_results)
             continue
 
-        run_id = adjusted_config["general"]["run"]
+        run_id = adjusted_config["metrics"]["wandb_run_name"]
         if run_id not in existing_runs:
             while len(running_jobs) >= parallel_slurm_jobs:
                 typer.echo(f"Maximum parallel jobs reached ({parallel_slurm_jobs}). Waiting for a job to finish...")
