@@ -3,7 +3,7 @@ import shutil
 import typer
 from pathlib import Path
 import yaml
-import tomllib
+import toml
 import subprocess
 import os
 import itertools
@@ -118,10 +118,10 @@ def load_yaml_from_file(path: str | Path):
             raise typer.Exit(code=1) from exc
 
 def load_toml_from_file(path: str | Path):
-    with open(path, "rb") as stream:
+    with open(path, "r") as stream:
         try:
-            return tomllib.load(stream)
-        except tomllib.TOMLDecodeError as exc:
+            return toml.load(stream)
+        except toml.TomlDecodeError as exc:
             typer.echo("Error: " + str(exc))
             raise typer.Exit(code=1) from exc 
 
@@ -314,7 +314,7 @@ def run_benchmark(config: dict, ngpu: int, account: str, shared_dir: Path, debug
     # Save the benchmark configuration in the shared directory
     bm_config_path = shared_dir / f"{job_name}_benchmark.toml"
     with open(bm_config_path, "w+b") as f:
-        tomllib.dump(config, f)
+        toml.dump(config, f)
 
     # Paths for logs
     log_dir = shared_dir / "logs"
