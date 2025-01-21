@@ -331,6 +331,7 @@ def run_mixtera_server(
     error_file = shared_dir / f"{server_job_name}.err"
     server_ip_file = shared_dir / f"{server_job_name}_ip.txt"
     mixtera_port = 1234
+    server_ip_file.unlink(missing_ok=True)
 
     job_server_path = f"{shared_dir}/{job_name}_mixserv"
 
