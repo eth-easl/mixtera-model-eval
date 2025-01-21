@@ -737,7 +737,7 @@ def run_benchmarks(
     tokenizer_obj = AutoTokenizer.from_pretrained(tokenizer, use_fast=True)
     vocab_size = max(tokenizer_obj.vocab_size, len(tokenizer_obj)) + 100
     typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
-    del tokenizer
+    del tokenizer_obj
 
     for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop in tqdm(
         list(
