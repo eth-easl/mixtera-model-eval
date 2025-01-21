@@ -263,7 +263,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
             persist_results_to_json(output_file, all_results)
             if mixtera_server_job_id:
                 cancel_mixtera_server(mixtera_server_job_id)
-                Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
+                shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
             continue
         elif job_id in squeue_proc.stdout:
             # Job is still running
@@ -280,7 +280,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                 if mixtera_server_job_id:
                     cancel_mixtera_server(mixtera_server_job_id)
-                    Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
+                    shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
 
                 continue
             else:
@@ -292,7 +292,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
-                        Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
+                        shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
 
                     continue
 
@@ -303,7 +303,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
-                        Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
+                        shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
 
                     if state != "COMPLETED" or not exit_code.startswith("0:0"):
                         typer.echo(f"Job {job_id} did not complete successfully.")
@@ -338,7 +338,7 @@ def run_mixtera_server(
     server_ip_file.unlink(missing_ok=True)
 
     job_server_path = f"{shared_dir}/{job_name}_mixserv"
-    Path(job_server_path).unlink(missing_ok=True)
+    shutil.rmtree(job_server_path, ignore_errors=True)
 
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={server_job_name}
@@ -830,7 +830,7 @@ def run_benchmarks(
                 persist_results_to_json(output_file, all_results)
                 if "mixtera_server_job_id" in job_info:  # If unsuccessful run, make sure to cancel server anyways.
                     cancel_mixtera_server(job_info["mixtera_server_job_id"])
-                    Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
+                    shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
 
