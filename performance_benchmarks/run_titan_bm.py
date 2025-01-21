@@ -162,7 +162,7 @@ def adjust_base_config(
     vocab_size: int,
     mixtera_chunk_size: int,
     mixtera_chunk_reading_degree_of_parallelism: int,
-    fileformat: str
+    fileformat: str,
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
     if "mixtera" not in config:
@@ -257,20 +257,9 @@ def check_running_jobs(running_jobs, all_results, output_file):
         # Check if the job is still running
         squeue_cmd = ["squeue", "-j", str(job_id)]
         squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
-        if squeue_proc.returncode != 0:
-            typer.echo(f"Error checking job status: {squeue_proc.stderr}")
-            # Consider the job as completed with failure
-            all_results.append(base_results | {"success": False})
-            persist_results_to_json(output_file, all_results)
-            if mixtera_server_job_id:
-                cancel_mixtera_server(mixtera_server_job_id)
-                shutil.rmtree(mixtera_server_dir, ignore_errors=True)
-            continue
-        elif job_id in squeue_proc.stdout:
-            # Job is still running
+        if job_id in squeue_proc.stdout:  # Job is still running
             updated_running_jobs.append(job)
-        else:
-            # Job has completed, check exit status and collect results
+        else:  # Job has completed, check exit status and collect results
             sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
             sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
 
@@ -656,7 +645,9 @@ def run_benchmarks(
     output_dir: Path,
     benchmark_name: str,
     model: ModelType,
-    dataset_path: Path = Path("/iopsstor/scratch/cscs/mbther/benchmark_data"), # relevant for non-mixtera. base directory for data
+    dataset_path: Path = Path(
+        "/iopsstor/scratch/cscs/mbther/benchmark_data"
+    ),  # relevant for non-mixtera. base directory for data
     mixtera_server_path: str = "/iopsstor/scratch/cscs/mbther/benchmark_mixtera_server",  # directory containing the prepared mixtera server dirs
     dl_workers: list[int] = [0, 1, 2, 4],
     dp_replicate_deg: list[int] = [1, 2, 4, 12],  # shard degree = ngpus / dp_replicate_deg
@@ -664,7 +655,7 @@ def run_benchmarks(
     seq_lengths: list[int] = [1024, 2048],
     seeds: list[int] = [42],
     dataloaders: list[Dataloader] = [Dataloader.hf, Dataloader.hf_stream],
-    fileformats: list[str] = ["jsonl"], # supported: jsonl, jsonl.zst, parquet, webdatasets
+    fileformats: list[str] = ["jsonl"],  # supported: jsonl, jsonl.zst, parquet, webdatasets
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
     account: str | None = None,
@@ -767,7 +758,7 @@ def run_benchmarks(
                 dataloaders,
                 mixtera_chunk_sizes,
                 mixtera_chunk_reading_degree_of_parallelisms,
-                fileformats
+                fileformats,
             )
         ),
         desc="Processing configurations",
@@ -794,7 +785,7 @@ def run_benchmarks(
             vocab_size,
             mix_cs,
             mix_crdop,
-            fileformat
+            fileformat,
         )
         base_results = {
             "config": adjusted_config,
