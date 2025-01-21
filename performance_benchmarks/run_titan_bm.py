@@ -18,16 +18,14 @@ from transformers import AutoTokenizer
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
 
+
 def check_pandas():
     try:
-        import pandas # implicitly required, otherwise wandb returns different type which breaks stuff
+        import pandas  # implicitly required, otherwise wandb returns different type which breaks stuff
 
     except ImportError:
-        typer.echo(
-            "Error: 'pandas' module is not available."
-        )
+        typer.echo("Error: 'pandas' module is not available.")
         raise typer.Exit(code=1)
-
 
 
 class ModelType(str, Enum):
@@ -38,11 +36,12 @@ class ModelType(str, Enum):
 
 
 class Dataloader(str, Enum):
-    hf = "hf" # use default torchtitan repo, ensure we don't use tiktoken but  hf tokenizer
-    hf_stream = "hf_stream" # use default torchtitan repo with iterable, ensure we don't use tiktoken but  hf tokenizer
-    mixtera = "mixtera" # torchtitan-mixtera
-    webdatasets = "webdatasets" # TBD
-    mosaic = "mosaic" # TBD
+    hf = "hf"  # use default torchtitan repo, ensure we don't use tiktoken but  hf tokenizer
+    hf_stream = "hf_stream"  # use default torchtitan repo with iterable, ensure we don't use tiktoken but  hf tokenizer
+    mixtera = "mixtera"  # torchtitan-mixtera
+    webdatasets = "webdatasets"  # TBD
+    mosaic = "mosaic"  # TBD
+
 
 # TODO: Find maximum microbatch size per GPU/model combination
 MODEL_MICROBATCH = {
@@ -70,6 +69,7 @@ CONTAINER_ENVIRONMENT = f"/users/mbther/.edf/torchtitan.toml"
 TORCHTITAN_PATH = f"/users/{os.environ.get('USER')}/torchtitan-mixtera"
 MIXTERA_PATH = f"/users/{os.environ.get('USER')}/mixtera"
 
+
 def ask_to_continue():
     response = input("Do you want to continue? (yes/no) [yes]: ").strip().lower()
 
@@ -81,11 +81,14 @@ def ask_to_continue():
         print("Invalid input, assuming 'yes'.")
         return True
 
+
 def current_milli_time():
     return round(time.time() * 1000)
 
+
 def load_base_config() -> dict:
     return load_toml_from_file(SCRIPT_DIR / "titan" / "base.toml")
+
 
 def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
     api = wandb.Api()
@@ -112,14 +115,12 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
         typer.echo("Timeout reached. Run did not finish in 10 minutes.")
         raise typer.Exit(code=1)
 
-    if (
-        "global_tps" not in run.history().to_dict().keys()
-        and retry < 5
-    ):
+    if "global_tps" not in run.history().to_dict().keys() and retry < 5:
         retry += 1
         return get_data_from_wandb(project, run_id, retry)
 
     return run.history().to_dict()
+
 
 def load_yaml_from_file(path: str | Path):
     with open(path) as stream:
@@ -129,17 +130,20 @@ def load_yaml_from_file(path: str | Path):
             typer.echo("Error: " + str(exc))
             raise typer.Exit(code=1) from exc
 
+
 def load_toml_from_file(path: str | Path):
     with open(path, "r") as stream:
         try:
             return toml.load(stream)
         except toml.TomlDecodeError as exc:
             typer.echo("Error: " + str(exc))
-            raise typer.Exit(code=1) from exc 
+            raise typer.Exit(code=1) from exc
+
 
 def persist_results_to_json(output: Path, all_results: list[dict]):
     with open(output, "w+") as fout:
         json.dump(all_results, fout, indent=4)
+
 
 def adjust_base_config(
     base_config: dict,
@@ -157,15 +161,13 @@ def adjust_base_config(
     dataloader: Dataloader,
     vocab_size: int,
     mixtera_chunk_size: int,
-    mixtera_chunk_reading_degree_of_parallelism: int
+    mixtera_chunk_reading_degree_of_parallelism: int,
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
     if "mixtera" not in config:
         config["mixtera"] = {}
 
-    run_name = (
-        f"run{curr_run}_dprep{dp}_ngpu{ngpu}_seed{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}"
-    )
+    run_name = f"run{curr_run}_dprep{dp}_ngpu{ngpu}_seed{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}"
     config["metrics"]["wandb_run_name"] = run_name
     config["mixtera"]["job_id"] = run_name
     config["metrics"]["wandb_project"] = bm_identifier
@@ -231,9 +233,9 @@ def adjust_base_config(
 
     if dp >= ngpu and dp > 1:
         additional_info["skipped"] = True
-        additional_info["skip_reason"] = f"dp = {dp} >= ngpu = {ngpu}" 
+        additional_info["skip_reason"] = f"dp = {dp} >= ngpu = {ngpu}"
         # we cannot have dp == ngpu because that deactivates FSDP, which deactivates bfloat16
-    
+
     if ngpu % dp != 0:
         additional_info["skipped"] = True
         additional_info["skip_reason"] = f"ngpu = {ngpu} % dp = {dp} != 0 (= {ngpu % dp})"
@@ -247,6 +249,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
         job_id = job["job_id"]
         base_results = job["base_results"]
         adjusted_config = job["config"]
+        mixtera_server_job_id = job.get("mixtera_server_job_id")
 
         # Check if the job is still running
         squeue_cmd = ["squeue", "-j", str(job_id)]
@@ -256,6 +259,8 @@ def check_running_jobs(running_jobs, all_results, output_file):
             # Consider the job as completed with failure
             all_results.append(base_results | {"success": False})
             persist_results_to_json(output_file, all_results)
+            if mixtera_server_job_id:
+                cancel_mixtera_server(mixtera_server_job_id)
             continue
         elif job_id in squeue_proc.stdout:
             # Job is still running
@@ -269,6 +274,10 @@ def check_running_jobs(running_jobs, all_results, output_file):
                 typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
                 all_results.append(base_results | {"success": False})
                 persist_results_to_json(output_file, all_results)
+
+                if mixtera_server_job_id:
+                    cancel_mixtera_server(mixtera_server_job_id)
+
                 continue
             else:
                 sacct_output = sacct_proc.stdout.strip()
@@ -276,12 +285,19 @@ def check_running_jobs(running_jobs, all_results, output_file):
                     typer.echo(f"No accounting information found for job {job_id}.")
                     all_results.append(base_results | {"success": False})
                     persist_results_to_json(output_file, all_results)
+
+                    if mixtera_server_job_id:
+                        cancel_mixtera_server(mixtera_server_job_id)
+
                     continue
 
                 job_info = sacct_output.split("|")
                 if len(job_info) >= 3:
                     state = job_info[1]
                     exit_code = job_info[2]
+
+                    if mixtera_server_job_id:
+                        cancel_mixtera_server(mixtera_server_job_id)
 
                     if state != "COMPLETED" or not exit_code.startswith("0:0"):
                         typer.echo(f"Job {job_id} did not complete successfully.")
@@ -303,7 +319,10 @@ def check_running_jobs(running_jobs, all_results, output_file):
                     persist_results_to_json(output_file, all_results)
     return updated_running_jobs
 
-def run_mixtera_server(config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str) -> tuple[str, int]:
+
+def run_mixtera_server(
+    config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str
+) -> tuple[str, str, int]:
     job_name = config["metrics"]["wandb_run_name"]
     server_job_name = f"{job_name}_mixtera_server"
     output_file = shared_dir / f"{server_job_name}.out"
@@ -391,7 +410,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     # Wait until the server IP file appears, indicating that the server job has started
     max_wait_time = 600  # Maximum wait time in seconds (10 minutes)
-    wait_interval = 5    # Wait interval in seconds
+    wait_interval = 5  # Wait interval in seconds
     elapsed_time = 0
 
     typer.echo(f"Waiting for Mixtera server to start, checking for IP file: {server_ip_file}")
@@ -403,7 +422,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
         raise RuntimeError("Timed out waiting for Mixtera server to start.")
 
     # Read the server IP address from the file
-    with open(server_ip_file, 'r') as f:
+    with open(server_ip_file, "r") as f:
         mixtera_server_ip = f.read().strip()
 
     typer.echo("Waiting an additional 20 seconds for Mixtera server to fully start...")
@@ -411,11 +430,12 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     typer.echo(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
 
-    # Return the server IP and port
-    return mixtera_server_ip, mixtera_port
+    return server_job_id, mixtera_server_ip, mixtera_port
 
 
-def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path, debug_partition: bool, mixtera_server_path: str) -> dict:
+def run_benchmark(
+    config: dict, ngpu: int, account: str | None, shared_dir: Path, debug_partition: bool, mixtera_server_path: str
+) -> dict:
     # Ensure shared directory exists
     shared_dir.mkdir(parents=True, exist_ok=True)
     data_cache_dir = shared_dir / "hf_data"
@@ -456,7 +476,9 @@ def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path
     mixtera_ip = "no_mixtera"
     mixtera_port = 1234
     if config["training"]["dataloader"] == "mixtera":
-        mixtera_ip, mixtera_port = run_mixtera_server(config, account, shared_dir, partition, mixtera_server_path)
+        mixtera_server_job_id, mixtera_ip, mixtera_port = run_mixtera_server(
+            config, account, shared_dir, partition, mixtera_server_path
+        )
 
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -469,7 +491,7 @@ def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path
 #SBATCH --no-requeue
 #SBATCH --gpus-per-task={SLURM_GPUS_PER_TASK}
 """
-    
+
     if account is not None and account != "":
         sbatch_header += f"\n#SBATCH --account={account}"
 
@@ -486,7 +508,7 @@ export CUDA_LAUNCH_BLOCKING=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
 """
-    
+
     master_setup = """
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
@@ -545,9 +567,16 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
     typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
     proc = subprocess.run(submit_command, capture_output=True, text=True)
+    result = {}
+
+    if mixtera_server_job_id:
+        result["mixtera_server_job_id"] = mixtera_server_job_id
+
     if proc.returncode != 0:
         typer.echo(f"Error submitting job: {proc.stderr}")
-        return {"success": False, "job_id": None}
+        result["success"] = False
+        result["job_id"] = None
+        return result
     else:
         typer.echo(f"Job submitted, sbatch output: {proc.stdout}")
         # Extract job ID from sbatch output
@@ -558,9 +587,23 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
                 break
         if job_id is None:
             typer.echo("Could not determine job ID from sbatch output.")
-            return {"success": False, "job_id": None}
+            result["success"] = False
+            result["job_id"] = None
+            return result
         else:
-            return {"success": True, "job_id": job_id}
+            result["success"] = True
+            result["job_id"] = job_id
+            return result
+
+
+def cancel_mixtera_server(server_job_id):
+    typer.echo(f"Cancelling Mixtera server job {server_job_id}")
+    scancel_cmd = ["scancel", str(server_job_id)]
+    proc = subprocess.run(scancel_cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        typer.echo(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
+    else:
+        typer.echo(f"Successfully cancelled Mixtera server job {server_job_id}")
 
 
 @app.command()
@@ -570,12 +613,12 @@ def run_benchmarks(
     model: ModelType,
     dataset_path: Path,
     dl_workers: list[int] = [0, 1, 2, 4],
-    dp_replicate_deg: list[int] = [1, 2, 4, 12], # shard degree = ngpus / dp_replicate_deg
-    ngpus: list[int] = [1, 4, 8, 12, 24], # each node has 4 GPUs
+    dp_replicate_deg: list[int] = [1, 2, 4, 12],  # shard degree = ngpus / dp_replicate_deg
+    ngpus: list[int] = [1, 4, 8, 12, 24],  # each node has 4 GPUs
     seq_lengths: list[int] = [1024, 2048],
     seeds: list[int] = [42],
     dataloaders: list[Dataloader] = [Dataloader.hf, Dataloader.hf_stream],
-    mixtera_server_path: str = "", # For now, we need to set up the Mixtera server directory manually. This gets cloned for each run.
+    mixtera_server_path: str = "",  # For now, we need to set up the Mixtera server directory manually. This gets cloned for each run.
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
     account: str | None = None,
@@ -584,7 +627,7 @@ def run_benchmarks(
     parallel_slurm_jobs: int = 1,
     tokenizer: str = "EleutherAI/gpt-neox-20b",
     mixtera_chunk_sizes: list[int] = [512],
-    mixtera_chunk_reading_degree_of_parallelisms: list[int] = [1]
+    mixtera_chunk_reading_degree_of_parallelisms: list[int] = [1],
 ):
     check_pandas()
 
@@ -648,7 +691,9 @@ def run_benchmarks(
         os.environ["HF_DATASETS_CACHE"] = str(dataset_cache_path)
         os.environ["HF_HOME"] = str(home_path)
     else:
-        typer.echo(f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf. Is that ok?")
+        typer.echo(
+            f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf. Is that ok?"
+        )
         ask_to_continue()
 
     running_jobs = []
@@ -660,14 +705,42 @@ def run_benchmarks(
     typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
 
     for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop in tqdm(
-        list(itertools.product(seeds, dl_workers, dp_replicate_deg, ngpus, seq_lengths, dataloaders, mixtera_chunk_sizes, mixtera_chunk_reading_degree_of_parallelisms)),
+        list(
+            itertools.product(
+                seeds,
+                dl_workers,
+                dp_replicate_deg,
+                ngpus,
+                seq_lengths,
+                dataloaders,
+                mixtera_chunk_sizes,
+                mixtera_chunk_reading_degree_of_parallelisms,
+            )
+        ),
         desc="Processing configurations",
     ):
-        if dataloader != Dataloader.mixtera and (mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]):
-            continue # only vary mixtera options for mixtera
+        if dataloader != Dataloader.mixtera and (
+            mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]
+        ):
+            continue  # only vary mixtera options for mixtera
 
         adjusted_config, additional_info = adjust_base_config(
-            base_config, shared_dir, tokenizer, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader, vocab_size, mix_cs, mix_crdop
+            base_config,
+            shared_dir,
+            tokenizer,
+            dataset_path,
+            bm_identifier,
+            curr_run,
+            model,
+            dl_worker,
+            dp,
+            ngpu,
+            seq_len,
+            seed,
+            dataloader,
+            vocab_size,
+            mix_cs,
+            mix_crdop,
         )
         base_results = {
             "config": adjusted_config,
@@ -688,16 +761,21 @@ def run_benchmarks(
 
             job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, mixtera_server_path)
             if job_info["success"]:
-                running_jobs.append(
-                    {
-                        "job_id": job_info["job_id"],
-                        "base_results": base_results,
-                        "config": adjusted_config,
-                    }
-                )
+                job_data = {
+                    "job_id": job_info["job_id"],
+                    "base_results": base_results,
+                    "config": adjusted_config,
+                }
+
+                if "mixtera_server_job_id" in job_info:
+                    job_data["mixtera_server_job_id"] = job_info["mixtera_server_job_id"]
+
+                running_jobs.append(job_data)
             else:
                 all_results.append(base_results | {"success": False})
                 persist_results_to_json(output_file, all_results)
+                if "mixtera_server_job_id" in job_info:  # If unsuccessful run, make sure to cancel server anyways.
+                    cancel_mixtera_server(job_info["mixtera_server_job_id"])
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
 
