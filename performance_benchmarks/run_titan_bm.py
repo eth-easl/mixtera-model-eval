@@ -668,7 +668,9 @@ def run_benchmarks(
     if not Path(MIXTERA_PATH).exists():
         raise RuntimeError(f"Cannot find mixtera at {MIXTERA_PATH}")
 
-    if Dataloader.mixtera in dataloaders and not Path(mixtera_server_path).exists():
+    if Dataloader.mixtera in dataloaders and (
+        mixtera_server_path is None or mixtera_server_path == "" or not Path(mixtera_server_path).exists()
+    ):
         raise RuntimeError(f"Mixtera server path {mixtera_server_path} does not exist, and you want to use Mixtera.")
 
     if parallel_slurm_jobs < 1:
