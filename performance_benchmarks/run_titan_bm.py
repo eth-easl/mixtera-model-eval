@@ -45,7 +45,7 @@ class Dataloader(str, Enum):
 
 # TODO: Find maximum microbatch size per GPU/model combination
 MODEL_MICROBATCH = {
-    ModelType.smollm162m: 128,  # tested, 256 crashes
+    ModelType.smollm162m: 128,  # tested, 256 crashes (on seq leng 1024); seq len > 1024 might require even smaller
     ModelType.llama1b: 2,  # not tested
     ModelType.llama8b: 6,  # not tested
     ModelType.llama70b: 1,  # not tested
@@ -415,6 +415,37 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     typer.echo(f"Waiting for Mixtera server to start, checking for IP file: {server_ip_file}")
     while not server_ip_file.exists() and elapsed_time < max_wait_time:
+        # Check if the server job is still running
+        squeue_cmd = ["squeue", "-j", str(server_job_id)]
+        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
+
+        if squeue_proc.returncode != 0:
+            raise RuntimeError(f"Error checking Mixtera server job status: {squeue_proc.stderr}")
+
+        if str(server_job_id) not in squeue_proc.stdout:
+            # Job is no longer running - check its exit status
+            sacct_cmd = [
+                "sacct",
+                "-j",
+                str(server_job_id),
+                "--format=JobIDRaw,State,ExitCode",
+                "--parsable2",
+                "--noheader",
+            ]
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+
+            if sacct_proc.returncode == 0 and sacct_proc.stdout.strip():
+                job_info = sacct_proc.stdout.strip().split("|")
+                if len(job_info) >= 3:
+                    state = job_info[1]
+                    exit_code = job_info[2]
+                    raise RuntimeError(
+                        f"Mixtera server job failed to start. Job State: {state}, Exit Code: {exit_code}. "
+                        f"Please check the logs at {output_file} for details."
+                    )
+
+            raise RuntimeError("Mixtera server job ended unexpectedly before starting up")
+
         time.sleep(wait_interval)
         elapsed_time += wait_interval
 
