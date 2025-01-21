@@ -668,6 +668,9 @@ def run_benchmarks(
     if not Path(MIXTERA_PATH).exists():
         raise RuntimeError(f"Cannot find mixtera at {MIXTERA_PATH}")
 
+    if Dataloader.mixtera in dataloaders and not Path(mixtera_server_path).exists():
+        raise RuntimeError(f"Mixtera server path {mixtera_server_path} does not exist, and you want to use Mixtera.")
+
     if parallel_slurm_jobs < 1:
         typer.echo("Error: parallel_slurm_jobs must be at least 1.")
         raise typer.Exit(code=1)
@@ -734,6 +737,7 @@ def run_benchmarks(
     tokenizer_obj = AutoTokenizer.from_pretrained(tokenizer, use_fast=True)
     vocab_size = max(tokenizer_obj.vocab_size, len(tokenizer_obj)) + 100
     typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
+    del tokenizer
 
     for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop in tqdm(
         list(
