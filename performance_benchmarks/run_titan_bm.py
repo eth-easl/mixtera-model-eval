@@ -353,15 +353,6 @@ set -eo pipefail
 echo "Copying Mixtera server directory"
 cp -r {mixtera_server_path} {job_server_path}
 
-echo "Getting server IP address"
-SERVER_IP=$(hostname -I | awk '{{print $1}}')
-echo "Server IP: $SERVER_IP"
-
-# Write the server IP to a file
-echo "Writing server IP to file"
-echo $SERVER_IP > {server_ip_file}
-sleep 1
-
 # Install Mixtera
 cd {MIXTERA_PATH}
 n=0
@@ -380,6 +371,15 @@ if [ $n -ge 5 ]; then
    echo 'pip install failed after 5 retries'
    exit 1
 fi
+
+echo "Getting server IP address"
+SERVER_IP=$(hostname -I | awk '{{print $1}}')
+echo "Server IP: $SERVER_IP"
+
+# Write the server IP to a file
+echo "Writing server IP to file"
+echo $SERVER_IP > {server_ip_file}
+sleep 1
 
 # Start the Mixtera server
 numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server_path} --host $SERVER_IP --port {mixtera_port}
@@ -455,8 +455,8 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     with open(server_ip_file, "r") as f:
         mixtera_server_ip = f.read().strip()
 
-    typer.echo("Waiting an additional 20 seconds for Mixtera server to fully start...")
-    time.sleep(20)
+    typer.echo("Waiting an additional 10 seconds for Mixtera server to fully start...")
+    time.sleep(10)
 
     typer.echo(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
 
