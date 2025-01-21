@@ -508,6 +508,7 @@ def run_benchmark(
 
     mixtera_ip = "no_mixtera"
     mixtera_port = 1234
+    mixtera_server_job_id = None
     if config["training"]["dataloader"] == "mixtera":
         mixtera_server_job_id, mixtera_ip, mixtera_port = run_mixtera_server(
             config, account, shared_dir, partition, mixtera_server_path
