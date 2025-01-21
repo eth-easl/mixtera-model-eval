@@ -11,10 +11,11 @@ save_memory_snapshot_folder = "memory_snapshot"
 
 [metrics]
 log_freq = 1
-enable_color_printing = true
+enable_color_printing = false
 enable_tensorboard = false
 save_tb_folder = "tb"
 enable_wandb = true
+disable_console_log = true
 
 [model]
 name = "llama3"
@@ -39,6 +40,8 @@ tensor_parallel_degree = 1
 compile = true
 dataset = ""
 seed = 1234
+add_bos = false
+add_eos = true
 
 [experimental]
 context_parallel_degree = 1

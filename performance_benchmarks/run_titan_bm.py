@@ -17,9 +17,20 @@ from tqdm import tqdm
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
 
+def check_pandas():
+    try:
+        import pandas # implicitly required, otherwise wandb returns different type which breaks stuff
+
+    except ImportError:
+        typer.echo(
+            "Error: 'pandas' module is not available."
+        )
+        raise typer.Exit(code=1)
+
+
 
 class ModelType(str, Enum):
-    smollm135m = "smollm135m"
+    smollm162m = "smollm162m"
     llama1b = "llama1b"
     llama8b = "llama8b"
     llama70b = "llama70b"
@@ -34,14 +45,14 @@ class Dataloader(str, Enum):
 
 # TODO: Find maximum microbatch size per GPU/model combination
 MODEL_MICROBATCH = {
-    ModelType.smollm135m: 256,  # not tested
+    ModelType.smollm162m: 256,  # not tested
     ModelType.llama1b: 2,  # not tested
     ModelType.llama8b: 6,  # not tested
     ModelType.llama70b: 1,  # not tested
 }
 
 MODEL_TOKENS = {
-    ModelType.smollm135m: 2000000,
+    ModelType.smollm162m: 2000000,
     ModelType.llama1b: 2000000,
     ModelType.llama8b: 2000000,
     ModelType.llama70b: 2000000,
@@ -456,6 +467,8 @@ def run_benchmarks(
     parallel_slurm_jobs: int = 1,
     tokenizer: str = "EleutherAI/gpt-neox-20b"
 ):
+    check_pandas()
+
     if parallel_slurm_jobs < 1:
         typer.echo("Error: parallel_slurm_jobs must be at least 1.")
         raise typer.Exit(code=1)
