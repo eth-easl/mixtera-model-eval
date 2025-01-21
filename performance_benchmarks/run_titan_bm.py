@@ -545,11 +545,11 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
 """
 
-    master_setup = """
+    master_setup = f"""
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
-head_node=${nodes_array[0]}
-head_node_ip=$(srun --environment={CONTAINER_ENVIRONMENT} --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+head_node=${{nodes_array[0]}}
+head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 echo Node IP: $head_node_ip
 """
 
