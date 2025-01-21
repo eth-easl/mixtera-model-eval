@@ -252,6 +252,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
         base_results = job["base_results"]
         adjusted_config = job["config"]
         mixtera_server_job_id = job.get("mixtera_server_job_id")
+        mixtera_server_dir = job.get("mixtera_server_dir")
 
         # Check if the job is still running
         squeue_cmd = ["squeue", "-j", str(job_id)]
@@ -263,7 +264,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
             persist_results_to_json(output_file, all_results)
             if mixtera_server_job_id:
                 cancel_mixtera_server(mixtera_server_job_id)
-                shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+                shutil.rmtree(mixtera_server_dir, ignore_errors=True)
             continue
         elif job_id in squeue_proc.stdout:
             # Job is still running
@@ -280,7 +281,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                 if mixtera_server_job_id:
                     cancel_mixtera_server(mixtera_server_job_id)
-                    shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+                    shutil.rmtree(mixtera_server_dir, ignore_errors=True)
 
                 continue
             else:
@@ -292,7 +293,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
-                        shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+                        shutil.rmtree(mixtera_server_dir, ignore_errors=True)
 
                     continue
 
@@ -303,7 +304,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
-                        shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+                        shutil.rmtree(mixtera_server_dir, ignore_errors=True)
 
                     if state != "COMPLETED" or not exit_code.startswith("0:0"):
                         typer.echo(f"Job {job_id} did not complete successfully.")
@@ -823,6 +824,7 @@ def run_benchmarks(
 
                 if "mixtera_server_job_id" in job_info:
                     job_data["mixtera_server_job_id"] = job_info["mixtera_server_job_id"]
+                    job_data["mixtera_server_dir"] = job_info["mixtera_server_dir"]
 
                 running_jobs.append(job_data)
             else:
