@@ -353,6 +353,9 @@ set -eo pipefail
 echo "Copying Mixtera server directory"
 cp -r {mixtera_server_path} {job_server_path}
 
+echo "Checking cmake version"
+cmake --version
+
 # Install Mixtera
 cd {MIXTERA_PATH}
 n=0
@@ -556,6 +559,9 @@ set -eo pipefail
 {master_setup}
 
 srun -ul --container-writable --environment={CONTAINER_ENVIRONMENT} bash -c "
+echo "Checking cmake version"
+cmake --version
+
 # Install torchtitan
 pushd {TORCHTITAN_PATH}
 pip install -e .
