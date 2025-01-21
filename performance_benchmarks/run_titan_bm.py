@@ -263,6 +263,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
             persist_results_to_json(output_file, all_results)
             if mixtera_server_job_id:
                 cancel_mixtera_server(mixtera_server_job_id)
+                Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
             continue
         elif job_id in squeue_proc.stdout:
             # Job is still running
@@ -279,6 +280,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                 if mixtera_server_job_id:
                     cancel_mixtera_server(mixtera_server_job_id)
+                    Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
 
                 continue
             else:
@@ -290,6 +292,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
+                        Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
 
                     continue
 
@@ -300,6 +303,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
+                        Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
 
                     if state != "COMPLETED" or not exit_code.startswith("0:0"):
                         typer.echo(f"Job {job_id} did not complete successfully.")
@@ -324,7 +328,7 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
 def run_mixtera_server(
     config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str
-) -> tuple[str, str, int]:
+) -> tuple[str, str, str, int]:
     job_name = config["metrics"]["wandb_run_name"]
     server_job_name = f"{job_name}_mixtera_server"
     output_file = shared_dir / f"{server_job_name}.out"
@@ -334,6 +338,7 @@ def run_mixtera_server(
     server_ip_file.unlink(missing_ok=True)
 
     job_server_path = f"{shared_dir}/{job_name}_mixserv"
+    Path(job_server_path).unlink(missing_ok=True)
 
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={server_job_name}
@@ -465,7 +470,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     typer.echo(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
 
-    return server_job_id, mixtera_server_ip, mixtera_port
+    return server_job_id, job_server_path, mixtera_server_ip, mixtera_port
 
 
 def run_benchmark(
@@ -511,8 +516,9 @@ def run_benchmark(
     mixtera_ip = "no_mixtera"
     mixtera_port = 1234
     mixtera_server_job_id = None
+    mixtera_server_dir = None
     if config["training"]["dataloader"] == "mixtera":
-        mixtera_server_job_id, mixtera_ip, mixtera_port = run_mixtera_server(
+        mixtera_server_job_id, mixtera_server_dir, mixtera_ip, mixtera_port = run_mixtera_server(
             config, account, shared_dir, partition, mixtera_server_path
         )
 
@@ -608,6 +614,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
 
     if mixtera_server_job_id:
         result["mixtera_server_job_id"] = mixtera_server_job_id
+        result["mixtera_server_dir"] = mixtera_server_dir
 
     if proc.returncode != 0:
         typer.echo(f"Error submitting job: {proc.stderr}")
@@ -823,6 +830,7 @@ def run_benchmarks(
                 persist_results_to_json(output_file, all_results)
                 if "mixtera_server_job_id" in job_info:  # If unsuccessful run, make sure to cancel server anyways.
                     cancel_mixtera_server(job_info["mixtera_server_job_id"])
+                    Path(job_info["mixtera_server_dir"]).unlink(missing_ok=True)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
 
