@@ -13,6 +13,7 @@ import wandb
 import time
 import math
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
@@ -45,7 +46,7 @@ class Dataloader(str, Enum):
 
 # TODO: Find maximum microbatch size per GPU/model combination
 MODEL_MICROBATCH = {
-    ModelType.smollm162m: 256,  # not tested
+    ModelType.smollm162m: 128,  # tested, 256 crashes
     ModelType.llama1b: 2,  # not tested
     ModelType.llama8b: 6,  # not tested
     ModelType.llama70b: 1,  # not tested
@@ -153,7 +154,10 @@ def adjust_base_config(
     ngpu: int,
     seq_length: int,
     seed: int,
-    dataloader: Dataloader
+    dataloader: Dataloader,
+    vocab_size: int,
+    mixtera_chunk_size: int,
+    mixtera_chunk_reading_degree_of_parallelism: int
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
     if "mixtera" not in config:
@@ -198,10 +202,11 @@ def adjust_base_config(
         config["training"]["dataloader"] = "huggingface"
         config["training"]["disable_streaming"] = False
     elif dataloader == Dataloader.mixtera:
-        raise NotImplementedError()
-        config["data_stages"][0]["data"]["dataset"] = { "path": "localhost", "port": 8888, "job_id": config["general"]["run"], "chunk_size": tODO, "tunnel_via_server": todo, "chunk_reading_degree_of_parallelism": todo, "chunk_reading_mixture_type": todo, "chunk_reading_window_size": todo, "chunk_reading_prefetch_first_sample": todo}
-        # chunk_reading_tokenizer, chunk_reading_sequence_len, chunk_reading_tokenization_bs
-        pass # todo we have to change config["data_stages"][0]["data"]["dataset"] to a mixtera conifg
+        config["training"]["dataloader"] = "mixtera"
+        config["mixtera"]["vocab_size"] = vocab_size
+        config["mixtera"]["chunk_size"] = mixtera_chunk_size
+        config["mixtera"]["tunnel_via_server"] = False
+        config["mixtera"]["chunk_reading_degree_of_parallelism"] = mixtera_chunk_reading_degree_of_parallelism
     else:
         raise NotImplementedError(f"Dataloader {dataloader} not yet supported.")
 
@@ -298,16 +303,125 @@ def check_running_jobs(running_jobs, all_results, output_file):
                     persist_results_to_json(output_file, all_results)
     return updated_running_jobs
 
-def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path, debug_partition: bool) -> dict:
+def run_mixtera_server(config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str) -> tuple[str, int]:
+    job_name = config["metrics"]["wandb_run_name"]
+    server_job_name = f"{job_name}_mixtera_server"
+    output_file = shared_dir / f"{server_job_name}.out"
+    error_file = shared_dir / f"{server_job_name}.err"
+    server_ip_file = shared_dir / f"{server_job_name}_ip.txt"
+    mixtera_port = 1234
+
+    job_server_path = f"{shared_dir}/{job_name}_mixserv"
+
+    sbatch_header = f"""#!/bin/bash
+#SBATCH --job-name={server_job_name}
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gpus-per-task=4
+#SBATCH --time={SLURM_TIME}
+#SBATCH --output={output_file}
+#SBATCH --error={error_file}
+#SBATCH --partition={partition}
+"""
+
+    if account:
+        sbatch_header += f"#SBATCH --account={account}\n"
+
+    # Commands to run in the server job
+    commands = f"""
+set -eo pipefail
+
+# Create cache directory for Mixtera server
+echo "Copying Mixtera server directory"
+cp -r {mixtera_server_path} {job_server_path}
+
+echo "Getting server IP address"
+SERVER_IP=$(hostname -I | awk '{{print $1}}')
+echo "Server IP: $SERVER_IP"
+
+# Write the server IP to a file
+echo "Writing server IP to file"
+echo $SERVER_IP > {server_ip_file}
+sleep 1
+
+# Install Mixtera
+cd {MIXTERA_PATH}
+n=0
+until [ $n -ge 5 ]
+do
+   if pip install -e .; then
+      echo 'pip install succeeded after try ('$n')'
+      break
+   else
+      n=$(($n+1))
+      echo 'pip install failed, retrying ('$n')'
+      sleep 1
+   fi
+done
+if [ $n -ge 5 ]; then
+   echo 'pip install failed after 5 retries'
+   exit 1
+fi
+
+# Start the Mixtera server
+numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server_path} --host $SERVER_IP --port {mixtera_port}
+"""
+
+    sbatch_script = sbatch_header + commands
+    sbatch_script_path = shared_dir / f"{server_job_name}_run.slurm"
+    with open(sbatch_script_path, "w") as f:
+        f.write(sbatch_script)
+
+    typer.echo(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
+    submit_command = ["sbatch", str(sbatch_script_path)]
+    proc = subprocess.run(submit_command, capture_output=True, text=True)
+    if proc.returncode != 0:
+        typer.echo(f"Error submitting Mixtera server job: {proc.stderr}")
+        raise RuntimeError("Failed to submit Mixtera server job.")
+    else:
+        typer.echo(f"Mixtera server job submitted: {proc.stdout}")
+        server_job_id = None
+        for line in proc.stdout.strip().split("\n"):
+            if "Submitted batch job" in line:
+                server_job_id = line.strip().split()[-1]
+                break
+        if server_job_id is None:
+            typer.echo("Could not determine Mixtera server job ID from sbatch output.")
+            raise RuntimeError("Failed to determine Mixtera server job ID.")
+
+    # Wait until the server IP file appears, indicating that the server job has started
+    max_wait_time = 600  # Maximum wait time in seconds (10 minutes)
+    wait_interval = 5    # Wait interval in seconds
+    elapsed_time = 0
+
+    typer.echo(f"Waiting for Mixtera server to start, checking for IP file: {server_ip_file}")
+    while not server_ip_file.exists() and elapsed_time < max_wait_time:
+        time.sleep(wait_interval)
+        elapsed_time += wait_interval
+
+    if not server_ip_file.exists():
+        raise RuntimeError("Timed out waiting for Mixtera server to start.")
+
+    # Read the server IP address from the file
+    with open(server_ip_file, 'r') as f:
+        mixtera_server_ip = f.read().strip()
+
+    typer.echo("Waiting an additional 20 seconds for Mixtera server to fully start...")
+    time.sleep(20)
+
+    typer.echo(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
+
+    # Return the server IP and port
+    return mixtera_server_ip, mixtera_port
+
+
+def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path, debug_partition: bool, mixtera_server_path: str) -> dict:
     # Ensure shared directory exists
     shared_dir.mkdir(parents=True, exist_ok=True)
     data_cache_dir = shared_dir / "hf_data"
     hf_home_dir = shared_dir / "hf_home"
     data_cache_dir.mkdir(parents=True, exist_ok=True)
     hf_home_dir.mkdir(parents=True, exist_ok=True)
-
-    if not Path(TORCHTITAN_PATH).exists():
-        raise RuntimeError(f"Cannot find torchtitan at {TORCHTITAN_PATH}")
 
     job_name = config["metrics"]["wandb_run_name"]
     dp = ngpu
@@ -319,7 +433,7 @@ def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path
 
     proc_per_node = SLURM_GPUS_PER_TASK
     if num_gpus < 4 and num_nodes == 1:
-        proc_per_node = num_gpus # ensure we use this for torchtitan
+        proc_per_node = num_gpus
 
     if num_nodes > 1 and num_gpus % SLURM_GPUS_PER_TASK != 0:
         raise RuntimeError(
@@ -339,7 +453,10 @@ def run_benchmark(config: dict, ngpu: int, account: str | None, shared_dir: Path
 
     partition = SLURM_PARTITION if not debug_partition else "debug"
 
-    # TODO: run mixtera server on separate node if mixtera
+    mixtera_ip = "no_mixtera"
+    mixtera_port = 1234
+    if config["training"]["dataloader"] == "mixtera":
+        mixtera_ip, mixtera_port = run_mixtera_server(config, account, shared_dir, partition, mixtera_server_path)
 
     sbatch_header = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -411,7 +528,7 @@ fi
 
 popd
 
-numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "todo" --mixtera.port 1234
+numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "{mixtera_ip}" --mixtera.port {mixtera_port}
 
 "
 """
@@ -458,16 +575,24 @@ def run_benchmarks(
     seq_lengths: list[int] = [1024, 2048],
     seeds: list[int] = [42],
     dataloaders: list[Dataloader] = [Dataloader.hf, Dataloader.hf_stream],
-    mixtera_server_path: str = "", # For now, we need to set up the Mixtera server directory manually
+    mixtera_server_path: str = "", # For now, we need to set up the Mixtera server directory manually. This gets cloned for each run.
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
     account: str | None = None,
     shared_dir: Path = SHARED_DIR_DEFAULT,
     debug_partition: bool = False,
     parallel_slurm_jobs: int = 1,
-    tokenizer: str = "EleutherAI/gpt-neox-20b"
+    tokenizer: str = "EleutherAI/gpt-neox-20b",
+    mixtera_chunk_sizes: list[int] = [512],
+    mixtera_chunk_reading_degree_of_parallelisms: list[int] = [1]
 ):
     check_pandas()
+
+    if not Path(TORCHTITAN_PATH).exists():
+        raise RuntimeError(f"Cannot find torchtitan at {TORCHTITAN_PATH}")
+
+    if not Path(MIXTERA_PATH).exists():
+        raise RuntimeError(f"Cannot find mixtera at {MIXTERA_PATH}")
 
     if parallel_slurm_jobs < 1:
         typer.echo("Error: parallel_slurm_jobs must be at least 1.")
@@ -528,12 +653,21 @@ def run_benchmarks(
 
     running_jobs = []
 
-    for seed, dl_worker, dp, ngpu, seq_len, dataloader in tqdm(
-        list(itertools.product(seeds, dl_workers, dp_replicate_deg, ngpus, seq_lengths, dataloaders)),
+    # Calculate Mixtera vocab size as for huggingface tokenizer in torchtitan
+    vocab_size = -1
+    tokenizer_obj = AutoTokenizer.from_pretrained(tokenizer, use_fast=True)
+    vocab_size = max(tokenizer_obj.vocab_size, len(tokenizer_obj)) + 100
+    typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
+
+    for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop in tqdm(
+        list(itertools.product(seeds, dl_workers, dp_replicate_deg, ngpus, seq_lengths, dataloaders, mixtera_chunk_sizes, mixtera_chunk_reading_degree_of_parallelisms)),
         desc="Processing configurations",
     ):
+        if dataloader != Dataloader.mixtera and (mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]):
+            continue # only vary mixtera options for mixtera
+
         adjusted_config, additional_info = adjust_base_config(
-            base_config, shared_dir, tokenizer, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader
+            base_config, shared_dir, tokenizer, dataset_path, bm_identifier, curr_run, model, dl_worker, dp, ngpu, seq_len, seed, dataloader, vocab_size, mix_cs, mix_crdop
         )
         base_results = {
             "config": adjusted_config,
@@ -552,7 +686,7 @@ def run_benchmarks(
                 running_jobs = check_running_jobs(running_jobs, all_results, output_file)
                 time.sleep(10)
 
-            job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition)
+            job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, mixtera_server_path)
             if job_info["success"]:
                 running_jobs.append(
                     {
