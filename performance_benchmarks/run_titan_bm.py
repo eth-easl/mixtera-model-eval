@@ -162,12 +162,13 @@ def adjust_base_config(
     vocab_size: int,
     mixtera_chunk_size: int,
     mixtera_chunk_reading_degree_of_parallelism: int,
+    fileformat: str
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
     if "mixtera" not in config:
         config["mixtera"] = {}
 
-    run_name = f"run{curr_run}_dprep{dp}_ngpu{ngpu}_seed{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}"
+    run_name = f"run{curr_run}_dprep{dp}_ngpu{ngpu}_{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}_{mixtera_chunk_size}_{mixtera_chunk_reading_degree_of_parallelism}_{fileformat}"
     config["metrics"]["wandb_run_name"] = run_name
     config["mixtera"]["job_id"] = run_name
     config["metrics"]["wandb_project"] = bm_identifier
@@ -194,7 +195,8 @@ def adjust_base_config(
     config["training"]["seed"] = seed
 
     # Set dataset path
-    config["training"]["dataset"] = str(dataset_path)
+    config["training"]["dataset"] = f"benchmark_{fileformat.replace('.', '')}"
+    config["training"]["dataset_path"] = str(dataset_path / fileformat)
 
     # Handle dataloader
     if dataloader == Dataloader.hf:
@@ -642,14 +644,15 @@ def run_benchmarks(
     output_dir: Path,
     benchmark_name: str,
     model: ModelType,
-    dataset_path: Path,
+    dataset_path: Path = Path("/iopsstor/scratch/cscs/mbther/benchmark_data"), # relevant for non-mixtera. base directory for data
+    mixtera_server_path: str = "/iopsstor/scratch/cscs/mbther/benchmark_mixtera_server",  # directory containing the prepared mixtera server dirs
     dl_workers: list[int] = [0, 1, 2, 4],
     dp_replicate_deg: list[int] = [1, 2, 4, 12],  # shard degree = ngpus / dp_replicate_deg
     ngpus: list[int] = [1, 4, 8, 12, 24],  # each node has 4 GPUs
     seq_lengths: list[int] = [1024, 2048],
     seeds: list[int] = [42],
     dataloaders: list[Dataloader] = [Dataloader.hf, Dataloader.hf_stream],
-    mixtera_server_path: str = "",  # For now, we need to set up the Mixtera server directory manually. This gets cloned for each run.
+    fileformats: list[str] = ["jsonl"], # supported: jsonl, jsonl.zst, parquet, webdatasets
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
     account: str | None = None,
@@ -741,7 +744,7 @@ def run_benchmarks(
     typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
     del tokenizer_obj
 
-    for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop in tqdm(
+    for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop, fileformat in tqdm(
         list(
             itertools.product(
                 seeds,
@@ -752,6 +755,7 @@ def run_benchmarks(
                 dataloaders,
                 mixtera_chunk_sizes,
                 mixtera_chunk_reading_degree_of_parallelisms,
+                fileformats
             )
         ),
         desc="Processing configurations",
@@ -778,6 +782,7 @@ def run_benchmarks(
             vocab_size,
             mix_cs,
             mix_crdop,
+            fileformat
         )
         base_results = {
             "config": adjusted_config,
@@ -796,7 +801,8 @@ def run_benchmarks(
                 running_jobs = check_running_jobs(running_jobs, all_results, output_file)
                 time.sleep(10)
 
-            job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, mixtera_server_path)
+            server_path = f"{mixtera_server_path}/{fileformat}"
+            job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path)
             if job_info["success"]:
                 job_data = {
                     "job_id": job_info["job_id"],
