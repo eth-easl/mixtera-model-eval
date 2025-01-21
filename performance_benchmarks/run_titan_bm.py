@@ -343,6 +343,7 @@ def run_mixtera_server(
 #SBATCH --output={output_file}
 #SBATCH --error={error_file}
 #SBATCH --partition={partition}
+#SBATCH --environment={CONTAINER_ENVIRONMENT}
 """
 
     if account:
@@ -524,6 +525,7 @@ def run_benchmark(
 #SBATCH --partition={partition}
 #SBATCH --no-requeue
 #SBATCH --gpus-per-task={SLURM_GPUS_PER_TASK}
+#SBATCH --environment={CONTAINER_ENVIRONMENT}
 """
 
     if account is not None and account != "":
@@ -547,7 +549,7 @@ export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
 head_node=${nodes_array[0]}
-head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+head_node_ip=$(srun --environment={CONTAINER_ENVIRONMENT} --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 echo Node IP: $head_node_ip
 """
 
