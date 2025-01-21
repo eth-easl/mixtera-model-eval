@@ -507,7 +507,7 @@ def run_benchmarks(
                 continue
             if not item.get("success", True):
                 continue
-            _run_id = item["metrics"].get("wandb_run_name", None)
+            _run_id = item["config"]["metrics"].get("wandb_run_name", None)
             if _run_id is not None and _run_id != "":
                 existing_runs.add(_run_id)
 
