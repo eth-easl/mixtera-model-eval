@@ -299,10 +299,10 @@ def run_mixtera_server(
 set -eo pipefail
 
 # Create cache directory for Mixtera server
-echo "Copying Mixtera server directory"
+echo 'Copying Mixtera server directory'
 cp -r {mixtera_server_path} {job_server_path}
 
-echo "Checking cmake version"
+echo 'Checking cmake version'
 cmake --version
 
 # Install Mixtera
@@ -516,7 +516,7 @@ set -eo pipefail
 {master_setup}
 
 srun -ul --container-writable --environment={CONTAINER_ENVIRONMENT} bash -c "
-echo "Checking cmake version"
+echo 'Checking cmake version'
 cmake --version
 
 # Install torchtitan
