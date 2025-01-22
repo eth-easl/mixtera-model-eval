@@ -617,7 +617,7 @@ def run_experiment(
     lock,
 ):
     server_path = f"{mixtera_server_path}/{fileformat}"
-    run_id = adjusted_config["config"]["metrics"].get("wandb_run_name", "no_run_id?!")
+    run_id = adjusted_config["metrics"].get("wandb_run_name", "no_run_id?!")
     job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path, lock)
     if job_info["success"]:
         mixtera_server_job_id = job_info.get("mixtera_server_job_id")
