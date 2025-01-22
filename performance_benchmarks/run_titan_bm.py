@@ -689,7 +689,7 @@ def run_experiment(
                             shutil.rmtree(mixtera_server_dir, ignore_errors=True)
 
                         if state != "COMPLETED" or not exit_code.startswith("0:0"):
-                            typer.echo(f"Job {job_id} did not complete successfully.")
+                            typer.echo(f"Job {job_id} (run id = {run_id}) did not complete successfully.")
                             typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
                             typer.echo(f"Please check the logs for details.")
                             with lock:
