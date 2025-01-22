@@ -126,10 +126,11 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
     while time.time() - start_time < timeout:
         if run.state == "finished":
             result = run.history().to_dict()
-            if str(num_steps - 1) not in result["global_tps"].keys():
+            target_key = num_steps - 1
+            if str(target_key) not in result["global_tps"].keys() and target_key not in result["global_tps"].keys():
                 max_key = max(int(key) for key in result["global_tps"].keys())
                 typer.echo(
-                    f"Run finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}."
+                    f"Run finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}. Key Type is {type(result["global_tps"].keys()[0])}."
                 )
             else:
                 break
