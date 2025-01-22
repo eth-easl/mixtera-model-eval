@@ -146,7 +146,7 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
 
     if "global_tps" not in result.keys() and retry < 5:
         retry += 1
-        return get_data_from_wandb(project, run_id, retry)
+        return get_data_from_wandb(project, run_id, num_steps, retry)
 
     return result
 
@@ -690,7 +690,9 @@ def run_experiment(
                         # Collect results from WandB
                         typer.echo("Collecting data from Weights & Biases.")
                         results = get_data_from_wandb(
-                            adjusted_config["metrics"]["wandb_project"], adjusted_config["metrics"]["wandb_run_name"]
+                            adjusted_config["metrics"]["wandb_project"],
+                            adjusted_config["metrics"]["wandb_run_name"],
+                            adjusted_config["training"]["steps"],
                         ) | {"success": True}
                         with lock:
                             all_results.append(base_results | results)
