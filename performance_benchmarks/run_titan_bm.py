@@ -277,7 +277,7 @@ def adjust_base_config(
 
 
 def run_mixtera_server(
-    config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str
+    config: dict, account: str | None, shared_dir: Path, partition: str, mixtera_server_path: str, lock
 ) -> tuple[str, str, str, int]:
     job_name = config["metrics"]["wandb_run_name"]
     server_job_name = f"{job_name}_mixtera_server"
@@ -355,8 +355,9 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     typer.echo(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
-    proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
-    time.sleep(1)
+    with lock:
+        time.sleep(0.3)
+        proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
     if proc.returncode != 0:
         typer.echo(f"Error submitting Mixtera server job: {proc.stderr}")
         raise RuntimeError("Failed to submit Mixtera server job.")
@@ -395,8 +396,9 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
                 "--parsable2",
                 "--noheader",
             ]
-            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
-            time.sleep(0.3)
+            with lock:
+                time.sleep(0.3)
+                sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
             if sacct_proc.returncode == 0 and sacct_proc.stdout.strip():
                 job_info = sacct_proc.stdout.strip().split("|")
@@ -482,7 +484,7 @@ def run_benchmark(
     mixtera_server_dir = None
     if config["training"]["dataloader"] == "mixtera":
         mixtera_server_job_id, mixtera_server_dir, mixtera_ip, mixtera_port = run_mixtera_server(
-            config, account, shared_dir, partition, mixtera_server_path
+            config, account, shared_dir, partition, mixtera_server_path, lock
         )
 
     sbatch_header = f"""#!/bin/bash
@@ -575,8 +577,9 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
     # Submit the job
     typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
-    proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
-    time.sleep(1) # wait a second to not spam the cluster.
+    with lock:
+        proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
+        time.sleep(0.5)  # wait a bit to not spam the cluster.
     result = {}
 
     if mixtera_server_job_id:
@@ -611,7 +614,6 @@ def cancel_mixtera_server(server_job_id):
     typer.echo(f"Cancelling Mixtera server job {server_job_id}")
     scancel_cmd = ["scancel", str(server_job_id)]
     proc = subprocess.run(scancel_cmd, capture_output=True, text=True, env=get_no_conda_env())
-    time.sleep(1)
     if proc.returncode != 0:
         typer.echo(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
     else:
@@ -645,8 +647,8 @@ def run_experiment(
             while not job_complete:
                 time.sleep(10)
                 squeue_cmd = ["squeue", "-j", str(job_id)]
-                squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
-                time.sleep(0.3)
+                with lock:  # lock to avoid spamming slurm
+                    squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
                 if job_id in squeue_proc.stdout:
                     # Job is still running
                     continue
