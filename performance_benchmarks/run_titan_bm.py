@@ -627,42 +627,39 @@ def run_experiment(
     all_results,
     lock,
 ):
-    server_path = f"{mixtera_server_path}/{fileformat}"
-    run_id = adjusted_config["metrics"].get("wandb_run_name", "no_run_id?!")
-    job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path, lock)
-    if job_info["success"]:
-        mixtera_server_job_id = job_info.get("mixtera_server_job_id")
-        mixtera_server_dir = job_info.get("mixtera_server_dir")
-        job_id = job_info["job_id"]
+    try:
+        server_path = f"{mixtera_server_path}/{fileformat}"
+        run_id = adjusted_config["metrics"].get("wandb_run_name", "no_run_id?!")
+        job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path, lock)
+        if job_info["success"]:
+            mixtera_server_job_id = job_info.get("mixtera_server_job_id")
+            mixtera_server_dir = job_info.get("mixtera_server_dir")
+            job_id = job_info["job_id"]
 
-        # Wait for the job to complete and collect results
-        job_complete = False
-        while not job_complete:
-            time.sleep(10)
-            squeue_cmd = ["squeue", "-j", str(job_id)]
-            squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
-            if job_id in squeue_proc.stdout:
-                # Job is still running
-                continue
+            # Wait for the job to complete and collect results
+            job_complete = False
+            while not job_complete:
+                time.sleep(10)
+                squeue_cmd = ["squeue", "-j", str(job_id)]
+                squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
+                if job_id in squeue_proc.stdout:
+                    # Job is still running
+                    continue
 
-            # Job has completed, check exit status and collect results
-            job_complete = True
-            sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
-            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
+                # Job has completed, check exit status and collect results
+                job_complete = True
+                sacct_cmd = [
+                    "sacct",
+                    "-j",
+                    str(job_id),
+                    "--format=JobIDRaw,State,ExitCode",
+                    "--parsable2",
+                    "--noheader",
+                ]
+                sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
-            if sacct_proc.returncode != 0:
-                typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
-                with lock:
-                    all_results.append(base_results | {"success": False})
-                    persist_results_to_json(output_file, all_results)
-
-                if mixtera_server_job_id:
-                    cancel_mixtera_server(mixtera_server_job_id)
-                    shutil.rmtree(mixtera_server_dir, ignore_errors=True)
-            else:
-                sacct_output = sacct_proc.stdout.strip()
-                if not sacct_output:
-                    typer.echo(f"No accounting information found for job {job_id}.")
+                if sacct_proc.returncode != 0:
+                    typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
                     with lock:
                         all_results.append(base_results | {"success": False})
                         persist_results_to_json(output_file, all_results)
@@ -670,48 +667,62 @@ def run_experiment(
                     if mixtera_server_job_id:
                         cancel_mixtera_server(mixtera_server_job_id)
                         shutil.rmtree(mixtera_server_dir, ignore_errors=True)
-
-                job_info = sacct_output.split("|")
-                if len(job_info) >= 3:
-                    state = job_info[1]
-                    exit_code = job_info[2]
-
-                    if mixtera_server_job_id:
-                        cancel_mixtera_server(mixtera_server_job_id)
-                        shutil.rmtree(mixtera_server_dir, ignore_errors=True)
-
-                    if state != "COMPLETED" or not exit_code.startswith("0:0"):
-                        typer.echo(f"Job {job_id} did not complete successfully.")
-                        typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
-                        typer.echo(f"Please check the logs for details.")
+                else:
+                    sacct_output = sacct_proc.stdout.strip()
+                    if not sacct_output:
+                        typer.echo(f"No accounting information found for job {job_id}.")
                         with lock:
                             all_results.append(base_results | {"success": False})
                             persist_results_to_json(output_file, all_results)
+
+                        if mixtera_server_job_id:
+                            cancel_mixtera_server(mixtera_server_job_id)
+                            shutil.rmtree(mixtera_server_dir, ignore_errors=True)
+
+                    job_info = sacct_output.split("|")
+                    if len(job_info) >= 3:
+                        state = job_info[1]
+                        exit_code = job_info[2]
+
+                        if mixtera_server_job_id:
+                            cancel_mixtera_server(mixtera_server_job_id)
+                            shutil.rmtree(mixtera_server_dir, ignore_errors=True)
+
+                        if state != "COMPLETED" or not exit_code.startswith("0:0"):
+                            typer.echo(f"Job {job_id} did not complete successfully.")
+                            typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
+                            typer.echo(f"Please check the logs for details.")
+                            with lock:
+                                all_results.append(base_results | {"success": False})
+                                persist_results_to_json(output_file, all_results)
+                        else:
+                            typer.echo(f"Job {job_id} (run id {run_id}) completed successfully.")
+                            # Collect results from WandB
+                            typer.echo("Collecting data from Weights & Biases.")
+                            results = get_data_from_wandb(
+                                adjusted_config["metrics"]["wandb_project"],
+                                adjusted_config["metrics"]["wandb_run_name"],
+                                adjusted_config["training"]["steps"],
+                            ) | {"success": True}
+                            typer.echo("Got data from Weights & Biases.")
+                            with lock:
+                                all_results.append(base_results | results)
+                                persist_results_to_json(output_file, all_results)
                     else:
-                        typer.echo(f"Job {job_id} (run id {run_id}) completed successfully.")
-                        # Collect results from WandB
-                        typer.echo("Collecting data from Weights & Biases.")
-                        results = get_data_from_wandb(
-                            adjusted_config["metrics"]["wandb_project"],
-                            adjusted_config["metrics"]["wandb_run_name"],
-                            adjusted_config["training"]["steps"],
-                        ) | {"success": True}
-                        typer.echo("Got data from Weights & Biases.")
+                        typer.echo(f"Unexpected sacct output: {sacct_output}")
                         with lock:
-                            all_results.append(base_results | results)
+                            all_results.append(base_results | {"success": False})
                             persist_results_to_json(output_file, all_results)
-                else:
-                    typer.echo(f"Unexpected sacct output: {sacct_output}")
-                    with lock:
-                        all_results.append(base_results | {"success": False})
-                        persist_results_to_json(output_file, all_results)
-    else:
-        with lock:
-            all_results.append(base_results | {"success": False})
-            persist_results_to_json(output_file, all_results)
-        if "mixtera_server_job_id" in job_info:
-            cancel_mixtera_server(job_info["mixtera_server_job_id"])
-            shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+        else:
+            with lock:
+                all_results.append(base_results | {"success": False})
+                persist_results_to_json(output_file, all_results)
+            if "mixtera_server_job_id" in job_info:
+                cancel_mixtera_server(job_info["mixtera_server_job_id"])
+                shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+    except Exception as e:
+        typer.echo(f"An error occurred in thread: {e}")
+        raise
 
 
 @app.command()
@@ -904,6 +915,7 @@ def run_benchmarks(
             future.result()
         except Exception as exc:
             typer.echo(f"Experiment generated an exception: {exc}")
+            raise typer.Exit(code=1) from exc
 
     persist_results_to_json(output_file, all_results)
 
