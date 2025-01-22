@@ -1,5 +1,8 @@
 from enum import Enum
 import shutil
+import threading
+
+import concurrent
 import typer
 from pathlib import Path
 import yaml
@@ -660,6 +663,102 @@ def cancel_mixtera_server(server_job_id):
     else:
         typer.echo(f"Successfully cancelled Mixtera server job {server_job_id}")
 
+def run_experiment(
+    adjusted_config,
+    base_results,
+    fileformat,
+    ngpu,
+    shared_dir,
+    debug_partition,
+    account,
+    mixtera_server_path,
+    output_file,
+    all_results,
+    lock
+):
+    server_path = f"{mixtera_server_path}/{fileformat}"
+    job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path)
+    if job_info["success"]:
+        mixtera_server_job_id = job_info.get("mixtera_server_job_id")
+        mixtera_server_dir = job_info.get("mixtera_server_dir")
+        job_id = job_info["job_id"]
+    
+        # Wait for the job to complete and collect results
+        job_complete = False
+        while not job_complete:
+            time.sleep(10)
+            squeue_cmd = ["squeue", "-j", str(job_id)]
+            squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
+            if job_id in squeue_proc.stdout:
+                # Job is still running
+                continue
+
+            # Job has completed, check exit status and collect results
+            job_complete = True
+            sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
+
+            if sacct_proc.returncode != 0:
+                typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
+                with lock:
+                    all_results.append(base_results | {"success": False})
+                    persist_results_to_json(output_file, all_results)
+
+                if mixtera_server_job_id:
+                    cancel_mixtera_server(mixtera_server_job_id)
+                    shutil.rmtree(mixtera_server_dir, ignore_errors=True)
+            else:
+                sacct_output = sacct_proc.stdout.strip()
+                if not sacct_output:
+                    typer.echo(f"No accounting information found for job {job_id}.")
+                    with lock:
+                        all_results.append(base_results | {"success": False})
+                        persist_results_to_json(output_file, all_results)
+
+                    if mixtera_server_job_id:
+                        cancel_mixtera_server(mixtera_server_job_id)
+                        shutil.rmtree(mixtera_server_dir, ignore_errors=True)
+
+                job_info = sacct_output.split("|")
+                if len(job_info) >= 3:
+                    state = job_info[1]
+                    exit_code = job_info[2]
+
+                    if mixtera_server_job_id:
+                        cancel_mixtera_server(mixtera_server_job_id)
+                        shutil.rmtree(mixtera_server_dir, ignore_errors=True)
+
+                    if state != "COMPLETED" or not exit_code.startswith("0:0"):
+                        typer.echo(f"Job {job_id} did not complete successfully.")
+                        typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
+                        typer.echo(f"Please check the logs for details.")
+                        with lock:
+                            all_results.append(base_results | {"success": False})
+                            persist_results_to_json(output_file, all_results)
+                    else:
+                        typer.echo(f"Job {job_id} completed successfully.")
+                        # Collect results from WandB
+                        typer.echo("Collecting data from Weights & Biases.")
+                        results = get_data_from_wandb(
+                            adjusted_config["metrics"]["wandb_project"], adjusted_config["metrics"]["wandb_run_name"]
+                        ) | {"success": True}
+                        with lock:
+                            all_results.append(base_results | results)
+                            persist_results_to_json(output_file, all_results)
+                else:
+                    typer.echo(f"Unexpected sacct output: {sacct_output}")
+                    with lock:
+                        all_results.append(base_results | {"success": False})
+                        persist_results_to_json(output_file, all_results)
+    else:
+        with lock:
+            all_results.append(base_results | {"success": False})
+            persist_results_to_json(output_file, all_results)
+        if "mixtera_server_job_id" in job_info:
+            cancel_mixtera_server(job_info["mixtera_server_job_id"])
+            shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
+
+
 
 @app.command()
 def run_benchmarks(
@@ -768,95 +867,89 @@ def run_benchmarks(
     typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
     del tokenizer_obj
 
-    for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop, fileformat in tqdm(
-        list(
-            itertools.product(
-                seeds,
-                dl_workers,
-                dp_replicate_deg,
-                ngpus,
-                seq_lengths,
-                dataloaders,
-                mixtera_chunk_sizes,
-                mixtera_chunk_reading_degree_of_parallelisms,
-                fileformats,
-            )
-        ),
-        desc="Processing configurations",
-    ):
-        if dataloader != Dataloader.mixtera and (
-            mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]
+    lock = threading.Lock()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_slurm_jobs) as executor:
+        futures = []
+        for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop, fileformat in tqdm(
+            list(
+                itertools.product(
+                    seeds,
+                    dl_workers,
+                    dp_replicate_deg,
+                    ngpus,
+                    seq_lengths,
+                    dataloaders,
+                    mixtera_chunk_sizes,
+                    mixtera_chunk_reading_degree_of_parallelisms,
+                    fileformats,
+                )
+            ),
+            desc="Scheduling experiments",
         ):
-            continue  # only vary mixtera options for mixtera
+            if dataloader != Dataloader.mixtera and (
+                mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]
+            ):
+                continue  # only vary mixtera options for mixtera
 
-        adjusted_config, additional_info = adjust_base_config(
-            base_config,
-            shared_dir,
-            tokenizer,
-            dataset_path,
-            bm_identifier,
-            curr_run,
-            model,
-            dl_worker,
-            dp,
-            ngpu,
-            seq_len,
-            seed,
-            dataloader,
-            vocab_size,
-            mix_cs,
-            mix_crdop,
-            fileformat,
-        )
-        base_results = {
-            "config": adjusted_config,
-            "model": model,
-            "dataset_path": str(dataset_path),
-        } | additional_info
+            adjusted_config, additional_info = adjust_base_config(
+                base_config,
+                shared_dir,
+                tokenizer,
+                dataset_path,
+                bm_identifier,
+                curr_run,
+                model,
+                dl_worker,
+                dp,
+                ngpu,
+                seq_len,
+                seed,
+                dataloader,
+                vocab_size,
+                mix_cs,
+                mix_crdop,
+                fileformat,
+            )
+            base_results = {
+                "config": adjusted_config,
+                "model": model,
+                "dataset_path": str(dataset_path),
+            } | additional_info
 
-        if additional_info["skipped"]:
-            all_results.append(base_results)
-            continue
+            if additional_info["skipped"]:
+                with lock:
+                    all_results.append(base_results)
+                continue
 
-        run_id = adjusted_config["metrics"]["wandb_run_name"]
-        if run_id not in existing_runs:
-            while len(running_jobs) >= parallel_slurm_jobs:
-                typer.echo(f"Maximum parallel jobs reached ({parallel_slurm_jobs}). Waiting for a job to finish...")
-                running_jobs = check_running_jobs(running_jobs, all_results, output_file)
-                time.sleep(10)
+            run_id = adjusted_config["metrics"]["wandb_run_name"]
+            if run_id not in existing_runs:
+                future = executor.submit(
+                    run_experiment,
+                    adjusted_config,
+                    base_results,
+                    fileformat,
+                    ngpu,
+                    shared_dir,
+                    debug_partition,
+                    account,
+                    mixtera_server_path,
+                    output_file,
+                    all_results,
+                    lock
+                )
+                futures.append(future)
 
-            server_path = f"{mixtera_server_path}/{fileformat}"
-            job_info = run_benchmark(adjusted_config, ngpu, account, shared_dir, debug_partition, server_path)
-            if job_info["success"]:
-                job_data = {
-                    "job_id": job_info["job_id"],
-                    "base_results": base_results,
-                    "config": adjusted_config,
-                }
-
-                if "mixtera_server_job_id" in job_info:
-                    job_data["mixtera_server_job_id"] = job_info["mixtera_server_job_id"]
-                    job_data["mixtera_server_dir"] = job_info["mixtera_server_dir"]
-
-                running_jobs.append(job_data)
-            else:
-                all_results.append(base_results | {"success": False})
-                persist_results_to_json(output_file, all_results)
-                if "mixtera_server_job_id" in job_info:  # If unsuccessful run, make sure to cancel server anyways.
-                    cancel_mixtera_server(job_info["mixtera_server_job_id"])
-                    shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
         else:
             typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
 
         curr_run += 1
 
     # After all jobs are submitted, wait for remaining jobs to finish
-    if running_jobs:
-        typer.echo("Waiting for all submitted jobs to finish...")
-        while running_jobs:
-            running_jobs = check_running_jobs(running_jobs, all_results, output_file)
-            if running_jobs:
-                time.sleep(10)
+    for future in concurrent.futures.as_completed(futures):
+        try:
+            future.result()
+        except Exception as exc:
+            typer.echo(f"Experiment generated an exception: {exc}")
 
     persist_results_to_json(output_file, all_results)
 
