@@ -110,7 +110,7 @@ def load_base_config() -> dict:
     return load_toml_from_file(SCRIPT_DIR / "titan" / "base.toml")
 
 
-def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
+def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 0) -> dict:
     api = wandb.Api()
     # Retrieve all runs and sort them by creation date in descending order
     runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
@@ -122,10 +122,19 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
 
     timeout = 600  # seconds
     start_time = time.time()
+    result = {}
     while time.time() - start_time < timeout:
         if run.state == "finished":
-            break
-        typer.echo("Still waiting for the run to finish on wandb.")
+            result = run.history().to_dict()
+            if str(num_steps - 1) not in result["global_tps"].keys():
+                max_key = max(int(key) for key in result["global_tps"].keys())
+                typer.echo(
+                    f"Run finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}."
+                )
+            else:
+                break
+
+        typer.echo("Sleeping for 10 seconds before getting data again from wandb.")
         time.sleep(10)
         api = wandb.Api()
         runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
@@ -135,11 +144,11 @@ def get_data_from_wandb(project: str, run_id: str, retry: int = 0) -> dict:
         typer.echo("Timeout reached. Run did not finish in 10 minutes.")
         raise typer.Exit(code=1)
 
-    if "global_tps" not in run.history().to_dict().keys() and retry < 5:
+    if "global_tps" not in result.keys() and retry < 5:
         retry += 1
         return get_data_from_wandb(project, run_id, retry)
 
-    return run.history().to_dict()
+    return result
 
 
 def load_yaml_from_file(path: str | Path):
