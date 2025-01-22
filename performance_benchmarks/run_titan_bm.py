@@ -356,6 +356,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     typer.echo(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
     proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
+    time.sleep(1)
     if proc.returncode != 0:
         typer.echo(f"Error submitting Mixtera server job: {proc.stderr}")
         raise RuntimeError("Failed to submit Mixtera server job.")
@@ -395,6 +396,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
                 "--noheader",
             ]
             sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
+            time.sleep(0.3)
 
             if sacct_proc.returncode == 0 and sacct_proc.stdout.strip():
                 job_info = sacct_proc.stdout.strip().split("|")
@@ -574,6 +576,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
     typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
     proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
+    time.sleep(1) # wait a second to not spam the cluster.
     result = {}
 
     if mixtera_server_job_id:
@@ -608,6 +611,7 @@ def cancel_mixtera_server(server_job_id):
     typer.echo(f"Cancelling Mixtera server job {server_job_id}")
     scancel_cmd = ["scancel", str(server_job_id)]
     proc = subprocess.run(scancel_cmd, capture_output=True, text=True, env=get_no_conda_env())
+    time.sleep(1)
     if proc.returncode != 0:
         typer.echo(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
     else:
@@ -642,6 +646,7 @@ def run_experiment(
                 time.sleep(10)
                 squeue_cmd = ["squeue", "-j", str(job_id)]
                 squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
+                time.sleep(0.3)
                 if job_id in squeue_proc.stdout:
                     # Job is still running
                     continue
