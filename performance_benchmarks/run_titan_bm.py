@@ -64,7 +64,9 @@ MODEL_TOKENS = {
 OMP_NUM_THREADS = "64"
 
 SLURM_PARTITION = "normal"
-SLURM_TIME = "00:15:00"
+SLURM_TIME = "00:30:00"
+SLURM_SERVER_TIME = "23:59:00"
+
 SLURM_GPUS_PER_TASK = 4
 
 SHARED_DIR_DEFAULT = Path(f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/torchtitan-benchmarks")
@@ -295,7 +297,7 @@ def run_mixtera_server(
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-task=4
-#SBATCH --time={SLURM_TIME}
+#SBATCH --time={SLURM_SERVER_TIME}
 #SBATCH --output={output_file}
 #SBATCH --error={error_file}
 #SBATCH --partition={partition}
