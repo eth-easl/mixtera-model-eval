@@ -69,6 +69,21 @@ CONTAINER_ENVIRONMENT = f"/users/mbther/.edf/torchtitan.toml"
 TORCHTITAN_PATH = f"/users/{os.environ.get('USER')}/torchtitan-mixtera"
 MIXTERA_PATH = f"/users/{os.environ.get('USER')}/mixtera"
 
+def get_no_conda_env():
+    env = os.environ.copy()
+
+    conda_prefix = env.get('CONDA_PREFIX', '')
+    conda_bin = os.path.join(conda_prefix, 'bin')
+
+    keys_to_remove = [key for key in env if 'CONDA' in key or 'PYTHON' in key]
+    for key in keys_to_remove:
+        del env[key]
+
+    paths = env['PATH'].split(os.pathsep)
+    paths = [p for p in paths if conda_bin not in p and conda_prefix not in p]
+    env['PATH'] = os.pathsep.join(paths)
+
+    return env
 
 def ask_to_continue():
     response = input("Do you want to continue? (yes/no) [yes]: ").strip().lower()
@@ -256,12 +271,12 @@ def check_running_jobs(running_jobs, all_results, output_file):
 
         # Check if the job is still running
         squeue_cmd = ["squeue", "-j", str(job_id)]
-        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
+        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
         if job_id in squeue_proc.stdout:  # Job is still running
             updated_running_jobs.append(job)
         else:  # Job has completed, check exit status and collect results
             sacct_cmd = ["sacct", "-j", str(job_id), "--format=JobIDRaw,State,ExitCode", "--parsable2", "--noheader"]
-            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
             if sacct_proc.returncode != 0:
                 typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
@@ -395,7 +410,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
 
     typer.echo(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
-    proc = subprocess.run(submit_command, capture_output=True, text=True)
+    proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
     if proc.returncode != 0:
         typer.echo(f"Error submitting Mixtera server job: {proc.stderr}")
         raise RuntimeError("Failed to submit Mixtera server job.")
@@ -419,7 +434,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     while not server_ip_file.exists() and elapsed_time < max_wait_time:
         # Check if the server job is still running
         squeue_cmd = ["squeue", "-j", str(server_job_id)]
-        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True)
+        squeue_proc = subprocess.run(squeue_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
         if squeue_proc.returncode != 0:
             raise RuntimeError(f"Error checking Mixtera server job status: {squeue_proc.stderr}")
@@ -434,7 +449,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
                 "--parsable2",
                 "--noheader",
             ]
-            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+            sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
             if sacct_proc.returncode == 0 and sacct_proc.stdout.strip():
                 job_info = sacct_proc.stdout.strip().split("|")
@@ -605,7 +620,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
     # Submit the job
     typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
-    proc = subprocess.run(submit_command, capture_output=True, text=True)
+    proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
     result = {}
 
     if mixtera_server_job_id:
@@ -639,7 +654,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
 def cancel_mixtera_server(server_job_id):
     typer.echo(f"Cancelling Mixtera server job {server_job_id}")
     scancel_cmd = ["scancel", str(server_job_id)]
-    proc = subprocess.run(scancel_cmd, capture_output=True, text=True)
+    proc = subprocess.run(scancel_cmd, capture_output=True, text=True, env=get_no_conda_env())
     if proc.returncode != 0:
         typer.echo(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
     else:
