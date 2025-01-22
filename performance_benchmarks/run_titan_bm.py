@@ -173,6 +173,7 @@ def load_toml_from_file(path: str | Path):
 def persist_results_to_json(output: Path, all_results: list[dict]):
     with open(output, "w+") as fout:
         json.dump(all_results, fout, indent=4)
+    typer.echo(f"Dumped data to {output}")
 
 
 def adjust_base_config(
@@ -695,6 +696,7 @@ def run_experiment(
                             adjusted_config["metrics"]["wandb_run_name"],
                             adjusted_config["training"]["steps"],
                         ) | {"success": True}
+                        typer.echo("Got data from Weights & Biases.")
                         with lock:
                             all_results.append(base_results | results)
                             persist_results_to_json(output_file, all_results)
@@ -890,9 +892,8 @@ def run_benchmarks(
                 )
                 futures.append(future)
                 total_runs += 1
-
-        else:
-            typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
+            else:
+                typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
 
         curr_run += 1
 
