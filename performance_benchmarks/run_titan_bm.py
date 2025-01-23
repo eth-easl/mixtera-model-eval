@@ -17,6 +17,7 @@ import time
 import math
 from tqdm import tqdm
 from transformers import AutoTokenizer
+from loguru import logger
 
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
@@ -27,7 +28,7 @@ def check_pandas():
         import pandas  # implicitly required, otherwise wandb returns different type which breaks stuff
 
     except ImportError:
-        typer.echo("Error: 'pandas' module is not available.")
+        logger.info("Error: 'pandas' module is not available.")
         raise typer.Exit(code=1)
 
 
@@ -119,7 +120,7 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
     run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if not run:
-        typer.echo(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
+        logger.info(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
         raise typer.Exit(code=1)
 
     timeout = 600  # seconds
@@ -131,20 +132,20 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
             target_key = num_steps - 1
             if str(target_key) not in result["global_tps"].keys() and target_key not in result["global_tps"].keys():
                 max_key = max(int(key) for key in result["global_tps"].keys())
-                typer.echo(
+                logger.info(
                     f"Run finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}. Key Type is {type(result["global_tps"].keys()[0])}."
                 )
             else:
                 break
 
-        typer.echo("Sleeping for 10 seconds before getting data again from wandb.")
+        logger.info("Sleeping for 10 seconds before getting data again from wandb.")
         time.sleep(10)
         api = wandb.Api()
         runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
         run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if run.state != "finished":
-        typer.echo("Timeout reached. Run did not finish in 10 minutes.")
+        logger.info("Timeout reached. Run did not finish in 10 minutes.")
         raise typer.Exit(code=1)
 
     if "global_tps" not in result.keys() and retry < 5:
@@ -159,7 +160,7 @@ def load_yaml_from_file(path: str | Path):
         try:
             return yaml.safe_load(stream)
         except yaml.YAMLError as exc:
-            typer.echo("Error: " + str(exc))
+            logger.info("Error: " + str(exc))
             raise typer.Exit(code=1) from exc
 
 
@@ -168,14 +169,14 @@ def load_toml_from_file(path: str | Path):
         try:
             return toml.load(stream)
         except toml.TomlDecodeError as exc:
-            typer.echo("Error: " + str(exc))
+            logger.info("Error: " + str(exc))
             raise typer.Exit(code=1) from exc
 
 
 def persist_results_to_json(output: Path, all_results: list[dict]):
     with open(output, "w+") as fout:
         json.dump(all_results, fout, indent=4)
-    typer.echo(f"Dumped data to {output}")
+    logger.info(f"Dumped data to {output}")
 
 
 def adjust_base_config(
@@ -355,23 +356,23 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     with open(sbatch_script_path, "w") as f:
         f.write(sbatch_script)
 
-    typer.echo(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
+    logger.info(f"Submitting Mixtera server job {server_job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
     with lock:
         time.sleep(0.3)
         proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
     if proc.returncode != 0:
-        typer.echo(f"Error submitting Mixtera server job: {proc.stderr}")
+        logger.info(f"Error submitting Mixtera server job: {proc.stderr}")
         raise RuntimeError("Failed to submit Mixtera server job.")
     else:
-        typer.echo(f"Mixtera server job submitted: {proc.stdout}")
+        logger.info(f"Mixtera server job submitted: {proc.stdout}")
         server_job_id = None
         for line in proc.stdout.strip().split("\n"):
             if "Submitted batch job" in line:
                 server_job_id = line.strip().split()[-1]
                 break
         if server_job_id is None:
-            typer.echo("Could not determine Mixtera server job ID from sbatch output.")
+            logger.info("Could not determine Mixtera server job ID from sbatch output.")
             raise RuntimeError("Failed to determine Mixtera server job ID.")
 
     # Wait until the server IP file appears, indicating that the server job has started
@@ -379,7 +380,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     wait_interval = 5  # Wait interval in seconds
     elapsed_time = 0
 
-    typer.echo(f"Waiting for Mixtera server to start, checking for IP file: {server_ip_file}")
+    logger.info(f"Waiting for Mixtera server to start, checking for IP file: {server_ip_file}")
     while not server_ip_file.exists() and elapsed_time < max_wait_time:
         # Check if the server job is still running
         squeue_cmd = ["squeue", "-j", str(server_job_id)]
@@ -424,10 +425,10 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
     with open(server_ip_file, "r") as f:
         mixtera_server_ip = f.read().strip()
 
-    typer.echo("Waiting an additional 10 seconds for Mixtera server to fully start...")
+    logger.info("Waiting an additional 10 seconds for Mixtera server to fully start...")
     time.sleep(10)
 
-    typer.echo(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
+    logger.info(f"Mixtera server is running at {mixtera_server_ip}:{mixtera_port}")
 
     return server_job_id, job_server_path, mixtera_server_ip, mixtera_port
 
@@ -577,7 +578,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
         f.write(sbatch_script)
 
     # Submit the job
-    typer.echo(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
+    logger.info(f"Submitting job {job_name} with sbatch script {sbatch_script_path}")
     submit_command = ["sbatch", str(sbatch_script_path)]
     with lock:
         proc = subprocess.run(submit_command, capture_output=True, text=True, env=get_no_conda_env())
@@ -589,12 +590,12 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
         result["mixtera_server_dir"] = mixtera_server_dir
 
     if proc.returncode != 0:
-        typer.echo(f"Error submitting job: {proc.stderr}")
+        logger.info(f"Error submitting job: {proc.stderr}")
         result["success"] = False
         result["job_id"] = None
         return result
     else:
-        typer.echo(f"Job submitted, sbatch output: {proc.stdout}")
+        logger.info(f"Job submitted, sbatch output: {proc.stdout}")
         # Extract job ID from sbatch output
         job_id = None
         for line in proc.stdout.strip().split("\n"):
@@ -602,7 +603,7 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
                 job_id = line.strip().split()[-1]
                 break
         if job_id is None:
-            typer.echo("Could not determine job ID from sbatch output.")
+            logger.info("Could not determine job ID from sbatch output.")
             result["success"] = False
             result["job_id"] = None
             return result
@@ -613,13 +614,13 @@ numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_n
 
 
 def cancel_mixtera_server(server_job_id):
-    typer.echo(f"Cancelling Mixtera server job {server_job_id}")
+    logger.info(f"Cancelling Mixtera server job {server_job_id}")
     scancel_cmd = ["scancel", str(server_job_id)]
     proc = subprocess.run(scancel_cmd, capture_output=True, text=True, env=get_no_conda_env())
     if proc.returncode != 0:
-        typer.echo(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
+        logger.info(f"Warning: Failed to cancel Mixtera server job {server_job_id}: {proc.stderr}")
     else:
-        typer.echo(f"Successfully cancelled Mixtera server job {server_job_id}")
+        logger.info(f"Successfully cancelled Mixtera server job {server_job_id}")
 
 
 def run_experiment(
@@ -668,7 +669,7 @@ def run_experiment(
                 sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
 
                 if sacct_proc.returncode != 0:
-                    typer.echo(f"Error checking job exit status: {sacct_proc.stderr}")
+                    logger.info(f"Error checking job exit status: {sacct_proc.stderr}")
                     with lock:
                         all_results.append(base_results | {"success": False})
                         persist_results_to_json(output_file, all_results)
@@ -679,7 +680,7 @@ def run_experiment(
                 else:
                     sacct_output = sacct_proc.stdout.strip()
                     if not sacct_output:
-                        typer.echo(f"No accounting information found for job {job_id}.")
+                        logger.info(f"No accounting information found for job {job_id}.")
                         with lock:
                             all_results.append(base_results | {"success": False})
                             persist_results_to_json(output_file, all_results)
@@ -698,27 +699,27 @@ def run_experiment(
                             shutil.rmtree(mixtera_server_dir, ignore_errors=True)
 
                         if state != "COMPLETED" or not exit_code.startswith("0:0"):
-                            typer.echo(f"Job {job_id} (run id = {run_id}) did not complete successfully.")
-                            typer.echo(f"Job State: {state}, Exit Code: {exit_code}")
-                            typer.echo(f"Please check the logs for details.")
+                            logger.info(f"Job {job_id} (run id = {run_id}) did not complete successfully.")
+                            logger.info(f"Job State: {state}, Exit Code: {exit_code}")
+                            logger.info(f"Please check the logs for details.")
                             with lock:
                                 all_results.append(base_results | {"success": False})
                                 persist_results_to_json(output_file, all_results)
                         else:
-                            typer.echo(f"Job {job_id} (run id {run_id}) completed successfully.")
+                            logger.info(f"Job {job_id} (run id {run_id}) completed successfully.")
                             # Collect results from WandB
-                            typer.echo("Collecting data from Weights & Biases.")
+                            logger.info("Collecting data from Weights & Biases.")
                             results = get_data_from_wandb(
                                 adjusted_config["metrics"]["wandb_project"],
                                 adjusted_config["metrics"]["wandb_run_name"],
                                 adjusted_config["training"]["steps"],
                             ) | {"success": True}
-                            typer.echo("Got data from Weights & Biases.")
+                            logger.info("Got data from Weights & Biases.")
                             with lock:
                                 all_results.append(base_results | results)
                                 persist_results_to_json(output_file, all_results)
                     else:
-                        typer.echo(f"Unexpected sacct output: {sacct_output}")
+                        logger.info(f"Unexpected sacct output: {sacct_output}")
                         with lock:
                             all_results.append(base_results | {"success": False})
                             persist_results_to_json(output_file, all_results)
@@ -730,7 +731,7 @@ def run_experiment(
                 cancel_mixtera_server(job_info["mixtera_server_job_id"])
                 shutil.rmtree(job_info["mixtera_server_dir"], ignore_errors=True)
     except Exception as e:
-        typer.echo(f"An error occurred in thread: {e}")
+        logger.info(f"An error occurred in thread: {e}")
         raise
 
 
@@ -774,30 +775,30 @@ def run_benchmarks(
         raise RuntimeError(f"Mixtera server path {mixtera_server_path} does not exist, and you want to use Mixtera.")
 
     if parallel_slurm_jobs < 1:
-        typer.echo("Error: parallel_slurm_jobs must be at least 1.")
+        logger.info("Error: parallel_slurm_jobs must be at least 1.")
         raise typer.Exit(code=1)
 
     output_file = output_dir / f"{benchmark_name}.json"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if output_file.exists() and not skip_existing:
-        typer.echo(f"Error: file {output_file} already exists. Specify --skip-existing to continue run.")
+        logger.info(f"Error: file {output_file} already exists. Specify --skip-existing to continue run.")
         raise typer.Exit(code=1)
 
     if output_file.exists() and skip_existing:
         bak_path = output_file.parent / f"{benchmark_name}.json.bak{current_milli_time()}"
         shutil.copyfile(output_file, bak_path)
-        typer.echo(
+        logger.info(
             f"Warning: file {output_file} already exists, copied to {bak_path} since --skip-existing is enabled."
         )
 
     if not output_file.exists() and skip_existing:
-        typer.echo(
+        logger.info(
             f"Warning: --skip-existing is enabled, but output file {output_file} does not exist. Won't skip anything"
         )
 
     if not all(ngpu == 1 or ngpu % 4 == 0 for ngpu in ngpus):
-        typer.echo("Error: ngpu(s) need to be 1, or multiple of 4.")
+        logger.info("Error: ngpu(s) need to be 1, or multiple of 4.")
         raise typer.Exit(code=1)
 
     all_results = []
@@ -827,7 +828,7 @@ def run_benchmarks(
         os.environ["HF_DATASETS_CACHE"] = str(dataset_cache_path)
         os.environ["HF_HOME"] = str(home_path)
     else:
-        typer.echo(
+        logger.info(
             f"Note that the hf cache path {huggingface_cache_path} does not exist. Using default path by hf. Is that ok?"
         )
         ask_to_continue()
@@ -836,7 +837,7 @@ def run_benchmarks(
     vocab_size = -1
     tokenizer_obj = AutoTokenizer.from_pretrained(tokenizer, use_fast=True)
     vocab_size = max(tokenizer_obj.vocab_size, len(tokenizer_obj)) + 100
-    typer.echo(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
+    logger.info(f"Determined vocab size {vocab_size} for tokenizer {tokenizer}")
     del tokenizer_obj
     total_runs = 0
 
@@ -913,22 +914,22 @@ def run_benchmarks(
                 futures.append(future)
                 total_runs += 1
             else:
-                typer.echo(f"Info: Skipping {run_id} since it already exists in the logs.")
+                logger.info(f"Info: Skipping {run_id} since it already exists in the logs.")
 
         curr_run += 1
 
-    typer.echo("Scheduled all experiments.")
+    logger.info("Scheduled all experiments.")
     # After all jobs are submitted, wait for remaining jobs to finish
     for future in tqdm(concurrent.futures.as_completed(futures), desc="Collecting futures", total=total_runs):
         try:
             future.result()
         except Exception as exc:
-            typer.echo(f"Experiment generated an exception: {exc}")
+            logger.info(f"Experiment generated an exception: {exc}")
             raise typer.Exit(code=1) from exc
 
     persist_results_to_json(output_file, all_results)
 
-    typer.echo("Ran all benchmarks.")
+    logger.info("Ran all benchmarks.")
 
 
 if __name__ == "__main__":
