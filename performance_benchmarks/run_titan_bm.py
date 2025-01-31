@@ -43,8 +43,8 @@ class Dataloader(str, Enum):
     hf = "hf"  # use default torchtitan repo, ensure we don't use tiktoken but  hf tokenizer
     hf_stream = "hf_stream"  # use default torchtitan repo with iterable, ensure we don't use tiktoken but  hf tokenizer
     mixtera = "mixtera"  # torchtitan-mixtera
-    webdatasets = "webdatasets"  # TBD
-    mosaic = "mosaic"  # TBD
+    webdatasets = "webdatasets" 
+    mosaic = "mosaic"
 
 
 # TODO: Find maximum microbatch size per GPU/model combination
@@ -245,6 +245,10 @@ def adjust_base_config(
         config["mixtera"]["chunk_size"] = mixtera_chunk_size
         config["mixtera"]["tunnel_via_server"] = False
         config["mixtera"]["chunk_reading_degree_of_parallelism"] = mixtera_chunk_reading_degree_of_parallelism
+    elif dataloader == Dataloader.webdatasets:
+        config["training"]["dataloader"] = "webdatasets"
+    elif dataloader == Dataloader.mosaic:
+        config["training"]["dataloader"] = "mosaic"
     else:
         raise NotImplementedError(f"Dataloader {dataloader} not yet supported.")
 
