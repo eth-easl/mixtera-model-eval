@@ -73,8 +73,7 @@ SLURM_GPUS_PER_TASK = 4
 SHARED_DIR_DEFAULT = Path(f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/torchtitan-benchmarks")
 CONTAINER_ENVIRONMENT = f"/users/mbther/.edf/torchtitan.toml"
 TORCHTITAN_PATH = f"/users/{os.environ.get('USER')}/torchtitan-mixtera"
-MIXTERA_PATH = f"/users/{os.environ.get('USER')}/mixtera"
-
+MIXTERA_PATH = f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/mixtera"
 
 def get_no_conda_env():
     env = os.environ.copy()
@@ -380,7 +379,7 @@ numactl --membind=0-3 python -u -m mixtera.network.server.entrypoint {job_server
             raise RuntimeError("Failed to determine Mixtera server job ID.")
 
     # Wait until the server IP file appears, indicating that the server job has started
-    max_wait_time = 600  # Maximum wait time in seconds (10 minutes)
+    max_wait_time = 21600  # Maximum wait time in seconds (6 hours)
     wait_interval = 5  # Wait interval in seconds
     elapsed_time = 0
 
