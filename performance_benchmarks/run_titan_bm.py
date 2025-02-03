@@ -279,6 +279,10 @@ def adjust_base_config(
         additional_info["skipped"] = True
         additional_info["skip_reason"] = f"ngpu = {ngpu} % dp = {dp} != 0 (= {ngpu % dp})"
 
+    if fileformat != "webdataset" and dataloader == Dataloader.webdatasets:
+        additional_info["skipped"] = True
+        additional_info["skip_reason"] = f"fileformat = {fileformat} != webdataset but dataloader is webdataset."
+
     return config, additional_info
 
 
