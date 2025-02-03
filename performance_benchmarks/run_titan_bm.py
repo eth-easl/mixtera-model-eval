@@ -283,9 +283,9 @@ def adjust_base_config(
         additional_info["skipped"] = True
         additional_info["skip_reason"] = f"fileformat = {fileformat} != webdataset but dataloader is webdataset."
 
-    if fileformat == "parquet" and dataloader == Dataloader.mosaic:
+    if (fileformat == "parquet" or fileformat == "jsonl.zst") and dataloader == Dataloader.mosaic:
         additional_info["skipped"] = True
-        additional_info["skip_reason"] = f"fileformat = parquet but DL is mosaic."
+        additional_info["skip_reason"] = f"fileformat = {fileformat} but DL is mosaic."
 
     return config, additional_info
 
