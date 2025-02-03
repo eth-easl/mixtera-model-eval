@@ -894,6 +894,7 @@ def run_benchmarks(
             base_results = {
                 "config": adjusted_config,
                 "model": model,
+                "fileformat": fileformat,
                 "dataset_path": str(dataset_path),
             } | additional_info
 
