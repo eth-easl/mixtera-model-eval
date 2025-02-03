@@ -122,7 +122,7 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
         logger.info(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
         raise typer.Exit(code=1)
 
-    timeout = 600  # seconds
+    timeout = 1200  # seconds
     start_time = time.time()
     result = {}
     while time.time() - start_time < timeout:
@@ -137,14 +137,14 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
             else:
                 break
 
-        logger.info(f"Sleeping for 10 seconds before getting data for {run_id} again from wandb.")
-        time.sleep(10)
+        logger.info(f"Sleeping for 30 seconds before getting data for {run_id} again from wandb.")
+        time.sleep(30)
         api = wandb.Api()
         runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
         run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if run.state != "finished":
-        logger.info(f"Timeout reached. Run {run_id} did not finish in 10 minutes.")
+        logger.info(f"Timeout reached. Run {run_id} did not finish in 20 minutes.")
         raise typer.Exit(code=1)
 
     if "global_tps" not in result.keys() and retry < 5:
