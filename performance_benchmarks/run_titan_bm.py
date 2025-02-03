@@ -132,19 +132,19 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
             if str(target_key) not in result["global_tps"].keys() and target_key not in result["global_tps"].keys():
                 max_key = max(int(key) for key in result["global_tps"].keys())
                 logger.info(
-                    f"Run finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}. Key Type is {type(result["global_tps"].keys()[0])}."
+                    f"Run {run_id} finished on wandb, but max key currently is {max_key}, waiting for key {num_steps - 1}. Key Type is {type(result["global_tps"].keys()[0])}."
                 )
             else:
                 break
 
-        logger.info("Sleeping for 10 seconds before getting data again from wandb.")
+        logger.info(f"Sleeping for 10 seconds before getting data for {run_id} again from wandb.")
         time.sleep(10)
         api = wandb.Api()
         runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
         run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
 
     if run.state != "finished":
-        logger.info("Timeout reached. Run did not finish in 10 minutes.")
+        logger.info(f"Timeout reached. Run {run_id} did not finish in 10 minutes.")
         raise typer.Exit(code=1)
 
     if "global_tps" not in result.keys() and retry < 5:
