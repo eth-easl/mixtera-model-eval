@@ -123,7 +123,9 @@ def infer_heads_and_kv(states: Dict[str, torch.Tensor], hidden_size: int) -> Tup
             if n_kv_heads_candidate == candidate:
                 candidates.append((candidate, n_kv_heads_candidate))
     if len(candidates) != 1:
-        print(f"Warning: Found multiple candidates, using the first one. Please specify the number of heads!\ncandidates = {candidates}")
+        print(
+            f"Warning: Found multiple candidates, using the first one. Please specify the number of heads!\ncandidates = {candidates}"
+        )
     return candidates[0][0]  # returns (n_heads, n_kv_heads)
 
 

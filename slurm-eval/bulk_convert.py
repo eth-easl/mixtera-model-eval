@@ -85,42 +85,29 @@ def generate_sbatch_script(
 #SBATCH --environment={CONTAINER_ENVIRONMENT}
 #SBATCH --account={ACCOUNT}
 
-set -eo pipefail
-
-echo "Installing mixtera..."
-pushd {MIXTERA_PATH}
-n=0
-until [ $n -ge 5 ]
-do
+srun --container-writable bash -c "echo 'Installing torchtitan...';
+pushd {TORCHTITAN_PATH} && pip install -e . && popd;
+echo 'Installing mixtera...';
+pushd {MIXTERA_PATH};
+n=0;
+until [ \$n -ge 5 ]; do
    if pip install -e .; then
-      echo "pip install succeeded after try ($n)"
-      break
+      echo 'pip install succeeded after try (\$n)'; break;
    else
-      n=$(($n+1))
-      echo "pip install failed, retrying ($n)"
-      sleep 1
-   fi
-done
-if [ $n -ge 5 ]; then
-   echo "pip install failed after 5 retries"
-   exit 1
-fi
-popd
-
-echo "Installing torchtitan..."
-pushd {TORCHTITAN_PATH}
-pip install -e .
-popd
-
-# Convert TorchTITAN checkpoint to torch format
-echo "Converting TorchTITAN checkpoint at {checkpoint_path} to torch format..."
-python -m torch.distributed.checkpoint.format_utils dcp_to_torch {checkpoint_path} {torch_output}
-
-# Convert the temporary torch checkpoint to Hugging Face format
-echo "Converting torch checkpoint to Hugging Face format..."
-{conversion_cmd}
-
-echo "Conversion completed for {checkpoint_path.name}"
+      n=\$(($$n+1));
+      echo 'pip install failed, retrying (\$n)';
+      sleep 1;
+   fi;
+done;
+if [ \$n -ge 5 ]; then
+   echo 'pip install failed after 5 retries'; exit 1;
+fi;
+popd;
+echo 'Converting TorchTITAN checkpoint at {checkpoint_path} to torch format...';
+python -m torch.distributed.checkpoint.format_utils dcp_to_torch {checkpoint_path} {torch_output};
+echo 'Converting torch checkpoint to Hugging Face format...';
+python {CONVERT_SCRIPT_PATH} --input {torch_output} --output {hf_output_dir} --tokenizer {tokenizer} --max_seq_len {max_seq_len} {n_kv_str};
+echo 'Conversion completed for {checkpoint_path.name}'"
 """
     sbatch_path = output_subdir / "run_conversion.slurm"
     with open(sbatch_path, "w") as f:
