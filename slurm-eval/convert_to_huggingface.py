@@ -123,10 +123,8 @@ def infer_heads_and_kv(states: Dict[str, torch.Tensor], hidden_size: int) -> Tup
             if n_kv_heads_candidate == candidate:
                 candidates.append((candidate, n_kv_heads_candidate))
     if len(candidates) != 1:
-        raise ValueError(
-            f"Unable to uniquely determine attention heads from checkpoint. Candidates found: {candidates}"
-        )
-    return candidates[0]  # returns (n_heads, n_kv_heads)
+        print(f"Warning: Found multiple candidates, using the first one. Please specify the number of heads!\ncandidates = {candidates}")
+    return candidates[0][0]  # returns (n_heads, n_kv_heads)
 
 
 def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n_kv_heads_override: int = None) -> Dict:
@@ -143,11 +141,7 @@ def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n
     if not layer_indices:
         raise ValueError("No transformer layer keys found in checkpoint!")
     n_layers = max(layer_indices) + 1
-
-    # Infer number of heads and key-value heads based on tensor shapes in layer 0.
-    inferred_n_heads, inferred_n_kv_heads = infer_heads_and_kv(states, hidden_size)
-    # Use override if provided.
-    n_kv_heads = n_kv_heads_override if n_kv_heads_override is not None else inferred_n_heads
+    n_kv_heads = n_kv_heads_override if n_kv_heads_override is not None else infer_heads_and_kv(states, hidden_size)
 
     # Infer intermediate dimension from one of the feed-forward weights:
     # Expected shape for feed_forward.w1.weight is (intermediate_dim, hidden_size)
