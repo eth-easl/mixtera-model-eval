@@ -20,6 +20,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_random_exponential, after_log, before_log
+import random
 
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
@@ -115,17 +116,18 @@ def load_base_config() -> dict:
 
 @retry( # to handle error 429s
     stop=stop_after_attempt(3),
-    wait=wait_random_exponential(multiplier=1, min=15, max=60),
+    wait=wait_random_exponential(multiplier=3, min=60, max=300),
     before=before_log(logger, logging.ERROR),
     after=after_log(logger, logging.ERROR),
     reraise=True,
 )
 def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 0) -> dict:
+    time.sleep(random.uniform(3,15))
     api = wandb.Api()
     # Retrieve all runs and sort them by creation date in descending order
+    time.sleep(random.uniform(1,3))
     runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
     run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
-
     if not run:
         logger.info(f"Error: Could not find run {run_id} in runs {[run.name for run in runs]}.")
         raise typer.Exit(code=1)
@@ -146,7 +148,7 @@ def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 
                 break
 
         logger.info(f"Sleeping for 30 seconds before getting data for {run_id} again from wandb.")
-        time.sleep(30)
+        time.sleep(random.uniform(25,35))
         api = wandb.Api()
         runs = sorted(api.runs(project), key=lambda x: x.created_at, reverse=True)
         run = next((run for run in runs if run.name.split("_", 2)[-1].startswith(run_id)), None)
