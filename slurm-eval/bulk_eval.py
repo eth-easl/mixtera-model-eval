@@ -101,11 +101,11 @@ def generate_evaluation_sbatch(
 #SBATCH --environment={CONTAINER_ENVIRONMENT}
 #SBATCH --account={ACCOUNT}
 
-set -eo pipefail
-echo "Running evaluation for {input_subdir.name}"
-{cmd}
-echo "Evaluation completed for {input_subdir.name}"
+srun --container-writable bash -c "echo 'Running evaluation for {input_subdir.name}';
+{cmd};
+echo 'Evaluation completed for {input_subdir.name}'"
 """
+
     sbatch_file = job_output_dir / "run_eval.slurm"
     with open(sbatch_file, "w") as f:
         f.write(sbatch_content)
