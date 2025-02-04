@@ -103,22 +103,25 @@ def infer_heads_and_kv(states: Dict[str, torch.Tensor], hidden_size: int) -> Tup
     Infers the number of attention heads and key-value heads using the query and key weight shapes.
     The assumption is that the query weight has shape (hidden_size, hidden_size) and its permutation
     requires that hidden_size is divisible by (2 * n_heads), so n_heads must be a divisor of (hidden_size//2).
-    For each candidate n_heads, we compute dims_per_head = hidden_size // (2 * candidate)
-    and check the key projection weight's shape: it should be (n_kv_heads * dims_per_head, hidden_size).
-    We require that there is exactly one candidate.
+    For each candidate n_heads, we compute dims_per_head = hidden_size // (2 * candidate) and then check the key
+    projection weight's shape: it should be (n_kv_heads * dims_per_head, hidden_size).
+    We accept as candidate those for which n_kv_heads equals candidate.
     """
-    # All candidates must divide hidden_size by 2 * candidate
     candidates = []
     possible_values = get_divisors(hidden_size)
+    # Check for candidates that ensure hidden_size % (2*n_heads)==0
     for candidate in possible_values:
         if hidden_size % (2 * candidate) == 0:
             dims_per_head = hidden_size // (2 * candidate)
-            key_shape = states["layers.0.attention.wk.weight"].shape  # (n_kv_heads * dims_per_head, hidden_size)
-            if key_shape[0] % dims_per_head == 0:
-                n_kv_heads_candidate = key_shape[0] // dims_per_head
-                # Validate that the candidate reconstructs the hidden size as expected:
-                if candidate * 2 * dims_per_head == hidden_size:
-                    candidates.append((candidate, n_kv_heads_candidate))
+            key_shape = states[
+                "layers.0.attention.wk.weight"
+            ].shape  # expected shape: (n_kv_heads * dims_per_head, hidden_size)
+            if key_shape[0] % dims_per_head != 0:
+                continue
+            n_kv_heads_candidate = key_shape[0] // dims_per_head
+            # Accept candidate only if n_kv_heads equals candidate.
+            if n_kv_heads_candidate == candidate:
+                candidates.append((candidate, n_kv_heads_candidate))
     if len(candidates) != 1:
         raise ValueError(
             f"Unable to uniquely determine attention heads from checkpoint. Candidates found: {candidates}"
@@ -126,7 +129,7 @@ def infer_heads_and_kv(states: Dict[str, torch.Tensor], hidden_size: int) -> Tup
     return candidates[0]  # returns (n_heads, n_kv_heads)
 
 
-def infer_config_from_checkpoint(state_dict: Dict[str, Any]) -> Dict:
+def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n_kv_heads_override: int = None) -> Dict:
     states = state_dict["model"]
     # Infer hidden_size from the token embedding weight (dimensions: vocab_size x hidden_size)
     vocab_size, hidden_size = states["tok_embeddings.weight"].shape
@@ -139,11 +142,12 @@ def infer_config_from_checkpoint(state_dict: Dict[str, Any]) -> Dict:
                 layer_indices.add(int(parts[1]))
     if not layer_indices:
         raise ValueError("No transformer layer keys found in checkpoint!")
-
     n_layers = max(layer_indices) + 1
 
     # Infer number of heads and key-value heads based on tensor shapes in layer 0.
-    n_heads, n_kv_heads = infer_heads_and_kv(states, hidden_size)
+    inferred_n_heads, inferred_n_kv_heads = infer_heads_and_kv(states, hidden_size)
+    # Use override if provided.
+    n_kv_heads = n_kv_heads_override if n_kv_heads_override is not None else inferred_n_heads
 
     # Infer intermediate dimension from one of the feed-forward weights:
     # Expected shape for feed_forward.w1.weight is (intermediate_dim, hidden_size)
@@ -152,9 +156,9 @@ def infer_config_from_checkpoint(state_dict: Dict[str, Any]) -> Dict:
     config = {
         "hidden_size": hidden_size,
         "n_layers": n_layers,
-        "n_heads": n_heads,
+        "n_heads": n_kv_heads,
         "n_kv_heads": n_kv_heads,
-        "max_seq_len": 2048,
+        "max_seq_len": max_seq_len,
         "vocab_size": vocab_size,
         "intermediate_dim": intermediate_dim,
         "activation": "silu",
@@ -170,6 +174,8 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=str, required=True, help="Path to the TorchTITAN .pt checkpoint file.")
     parser.add_argument("--output", type=str, required=True, help="Output folder path for the Hugging Face model.")
     parser.add_argument("--tokenizer", type=str, default="EleutherAI/gpt-neox-20b", help="Which tokenizer to use.")
+    parser.add_argument("--max_seq_len", type=int, default=2048, help="Maximum sequence length.")
+    parser.add_argument("--n_kv_heads", type=int, default=None, help="Override number of key-value heads if provided.")
 
     args = parser.parse_args()
 
@@ -178,10 +184,9 @@ if __name__ == "__main__":
 
     print(f"Loading checkpoint from {checkpoint_path}...")
     state_dict = torch.load(checkpoint_path, map_location=torch.device("cpu"), weights_only=False)
-    # Infer configuration parameters based on the state dict shapes
-    inferred_config = infer_config_from_checkpoint(state_dict)
+    # Infer configuration parameters, passing max_seq_len and n_kv_heads override if provided.
+    inferred_config = infer_config_from_checkpoint(state_dict, args.max_seq_len, args.n_kv_heads)
 
-    # Print inferred configuration parameters:
     print("Inferred configuration:")
     for key, value in inferred_config.items():
         print(f"  {key}: {value}")

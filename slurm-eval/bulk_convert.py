@@ -4,7 +4,8 @@ Bulk TorchTITAN-to-HuggingFace Checkpoint Converter Launcher
 
 Usage:
     python bulk_convert_checkpoints.py --checkpoints-dir /path/to/checkpoints \
-        --output-dir /path/to/output --max-parallel 4 [--tokenizer EleutherAI/gpt-neox-20b]
+        --output-dir /path/to/output --max-parallel 4 [--tokenizer EleutherAI/gpt-neox-20b] \
+        [--max-seq-len 2048] [--n-kv-heads 16]
 
 This script scans the given checkpoints directory for "step-*" subdirectories.
 For each such checkpoint, it creates an output subdirectory (e.g. output_dir/step-1000)
@@ -15,6 +16,7 @@ and writes an sbatch file which will:
     3. Convert the temporary .pt file to a Hugging Face checkpoint by calling
        the provided conversion script (with full path):
        python /full/path/convert_to_huggingface.py --input checkpoint.pt --output hf --tokenizer <tokenizer>
+           --max_seq_len <max_seq_len> [--n_kv_heads <n_kv_heads>]
 Logs are saved within each output subdirectory.
 The launcher submits the conversion jobs one by one, waiting for each to finish before submitting the next.
 """
@@ -40,22 +42,20 @@ ACCOUNT = "a-a09"
 
 def get_no_conda_env():
     env = os.environ.copy()
-
     conda_prefix = env.get("CONDA_PREFIX", "")
     conda_bin = os.path.join(conda_prefix, "bin")
-
     keys_to_remove = [key for key in env if "CONDA" in key or "PYTHON" in key]
     for key in keys_to_remove:
         del env[key]
-
     paths = env["PATH"].split(os.pathsep)
     paths = [p for p in paths if conda_bin not in p and conda_prefix not in p]
     env["PATH"] = os.pathsep.join(paths)
-
     return env
 
 
-def generate_sbatch_script(checkpoint_path: Path, output_subdir: Path, tokenizer: str) -> Path:
+def generate_sbatch_script(
+    checkpoint_path: Path, output_subdir: Path, tokenizer: str, max_seq_len: int, n_kv_heads: int = None
+) -> Path:
     """
     Generate an sbatch file that converts a TorchTITAN checkpoint to a Hugging Face checkpoint.
     The generated script installs torchtitan and mixtera, converts the checkpoint to torch format,
@@ -67,7 +67,12 @@ def generate_sbatch_script(checkpoint_path: Path, output_subdir: Path, tokenizer
     logs_out = output_subdir / "logs.out"
     logs_err = output_subdir / "logs.err"
 
-    # Build the sbatch script content
+    # Build the conversion command string.
+    n_kv_str = f"--n_kv_heads {n_kv_heads}" if n_kv_heads is not None else ""
+    conversion_cmd = (
+        f"python {CONVERT_SCRIPT_PATH} --input {torch_output} --output {hf_output_dir} "
+        f"--tokenizer {tokenizer} --max_seq_len {max_seq_len} {n_kv_str}"
+    )
     script_content = f"""#!/bin/bash
 #SBATCH --job-name=convert-{checkpoint_path.name}
 #SBATCH --nodes=1
@@ -113,7 +118,7 @@ python -m torch.distributed.checkpoint.format_utils dcp_to_torch {checkpoint_pat
 
 # Convert the temporary torch checkpoint to Hugging Face format
 echo "Converting torch checkpoint to Hugging Face format..."
-python {CONVERT_SCRIPT_PATH} --input {torch_output} --output {hf_output_dir} --tokenizer {tokenizer}
+{conversion_cmd}
 
 echo "Conversion completed for {checkpoint_path.name}"
 """
@@ -137,14 +142,12 @@ def submit_and_wait(sbatch_path: Path):
     submission_line = result.stdout.strip()
     typer.echo(f"Submitted job for {sbatch_path.parent.name}: {submission_line}")
 
-    # Retrieve job id from submission_line, e.g. "Submitted batch job 12345"
     try:
         job_id = submission_line.split()[-1]
-    except Exception as e:
+    except Exception:
         typer.echo("Failed to determine job ID from submission output.")
         return
 
-    # Wait until job is no longer in squeue (job finished)
     typer.echo(f"Waiting for job {job_id} to finish...")
     while True:
         squeue_proc = subprocess.run(["squeue", "-j", job_id], capture_output=True, text=True, env=get_no_conda_env())
@@ -152,7 +155,6 @@ def submit_and_wait(sbatch_path: Path):
             break
         time.sleep(10)
 
-    # Optionally, check job exit status via sacct (if available) to log warnings
     sacct_cmd = [
         "sacct",
         "-j",
@@ -190,6 +192,8 @@ def main(
     tokenizer: str = typer.Option(
         "EleutherAI/gpt-neox-20b", help="Tokenizer identifier for converting to Hugging Face format"
     ),
+    max_seq_len: int = typer.Option(2048, help="Maximum sequence length for the converted model"),
+    n_kv_heads: int = typer.Option(None, help="Override number of key-value heads (optional)"),
 ):
     # Check that the output directory exists and is empty; if not, fail early
     if output_dir.exists():
@@ -205,7 +209,6 @@ def main(
         typer.echo("No checkpoint subdirectories found in the given checkpoints directory.")
         raise typer.Exit(code=1)
 
-    # Sort the step subdirectories by the numeric suffix of "step-"
     try:
         step_dirs.sort(key=lambda p: int(p.name.split("-")[-1]))
     except Exception:
@@ -213,7 +216,6 @@ def main(
         raise typer.Exit(code=1)
 
     sbatch_paths = []
-    # For each checkpoint subdirectory, create an output folder and generate the sbatch script
     for step_dir in step_dirs:
         output_subdir = output_dir / step_dir.name
         try:
@@ -222,14 +224,12 @@ def main(
             typer.echo(f"Error: Output subdirectory {output_subdir} already exists.")
             raise typer.Exit(code=1)
 
-        sbatch_file = generate_sbatch_script(step_dir, output_subdir, tokenizer)
+        sbatch_file = generate_sbatch_script(step_dir, output_subdir, tokenizer, max_seq_len, n_kv_heads)
         sbatch_paths.append(sbatch_file)
         typer.echo(f"Created sbatch script for {step_dir.name} at {sbatch_file}")
 
-    # Submit conversion jobs with at most max_parallel concurrent threads
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as executor:
         futures = [executor.submit(submit_and_wait, sp) for sp in sbatch_paths]
-        # Wait for all futures to complete
         for future in concurrent.futures.as_completed(futures):
             future.result()
 
