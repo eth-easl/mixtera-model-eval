@@ -35,6 +35,8 @@ MIXTERA_PATH = f"/iopsstor/scratch/cscs/{os.environ.get('USER')}/mixtera"
 THIS_DIR = Path(os.path.realpath(__file__)).parent
 CONVERT_SCRIPT_PATH = THIS_DIR / "convert_to_huggingface.py"
 
+ACCOUNT = "a-a09"
+
 
 def generate_sbatch_script(checkpoint_path: Path, output_subdir: Path, tokenizer: str) -> Path:
     """
@@ -59,6 +61,7 @@ def generate_sbatch_script(checkpoint_path: Path, output_subdir: Path, tokenizer
 #SBATCH --partition=normal
 #SBATCH --gpus-per-task=4
 #SBATCH --environment={CONTAINER_ENVIRONMENT}
+#SBATCH --account={ACCOUNT}
 
 set -eo pipefail
 

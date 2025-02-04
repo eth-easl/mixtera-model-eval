@@ -31,7 +31,7 @@ app = typer.Typer()
 THIS_DIR = Path(os.path.realpath(__file__)).parent
 EVAL_SCRIPT_PATH = THIS_DIR / "eval_checkpoint.py"
 CONTAINER_ENVIRONMENT = f"/users/mbther/.edf/torchtitan.toml"
-
+ACCOUNT = "a-a09"
 
 def generate_evaluation_sbatch(
     input_subdir: Path,
@@ -81,6 +81,7 @@ def generate_evaluation_sbatch(
 #SBATCH --partition=normal
 #SBATCH --gpus-per-task=4
 #SBATCH --environment={CONTAINER_ENVIRONMENT}
+#SBATCH --account={ACCOUNT}
 
 set -eo pipefail
 echo "Running evaluation for {input_subdir.name}"
