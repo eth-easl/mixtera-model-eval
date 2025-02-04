@@ -38,6 +38,23 @@ CONVERT_SCRIPT_PATH = THIS_DIR / "convert_to_huggingface.py"
 ACCOUNT = "a-a09"
 
 
+def get_no_conda_env():
+    env = os.environ.copy()
+
+    conda_prefix = env.get("CONDA_PREFIX", "")
+    conda_bin = os.path.join(conda_prefix, "bin")
+
+    keys_to_remove = [key for key in env if "CONDA" in key or "PYTHON" in key]
+    for key in keys_to_remove:
+        del env[key]
+
+    paths = env["PATH"].split(os.pathsep)
+    paths = [p for p in paths if conda_bin not in p and conda_prefix not in p]
+    env["PATH"] = os.pathsep.join(paths)
+
+    return env
+
+
 def generate_sbatch_script(checkpoint_path: Path, output_subdir: Path, tokenizer: str) -> Path:
     """
     Generate an sbatch file that converts a TorchTITAN checkpoint to a Hugging Face checkpoint.
@@ -113,7 +130,7 @@ def submit_and_wait(sbatch_path: Path):
     """
     # Submit the job
     cmd = ["sbatch", str(sbatch_path)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=get_no_conda_env())
     if result.returncode != 0:
         typer.echo(f"Error submitting job for {sbatch_path.parent.name}: {result.stderr}")
         return
@@ -130,7 +147,7 @@ def submit_and_wait(sbatch_path: Path):
     # Wait until job is no longer in squeue (job finished)
     typer.echo(f"Waiting for job {job_id} to finish...")
     while True:
-        squeue_proc = subprocess.run(["squeue", "-j", job_id], capture_output=True, text=True)
+        squeue_proc = subprocess.run(["squeue", "-j", job_id], capture_output=True, text=True, env=get_no_conda_env())
         if job_id not in squeue_proc.stdout:
             break
         time.sleep(10)
@@ -144,7 +161,7 @@ def submit_and_wait(sbatch_path: Path):
         "--parsable2",
         "--noheader",
     ]
-    sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True)
+    sacct_proc = subprocess.run(sacct_cmd, capture_output=True, text=True, env=get_no_conda_env())
     if sacct_proc.returncode == 0 and sacct_proc.stdout.strip():
         job_info = sacct_proc.stdout.strip().split("|")
         if len(job_info) >= 3:
