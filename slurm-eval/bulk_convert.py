@@ -87,11 +87,6 @@ def generate_sbatch_script(
 
 set -eo pipefail
 
-echo "Installing torchtitan..."
-pushd {TORCHTITAN_PATH}
-pip install -e .
-popd
-
 echo "Installing mixtera..."
 pushd {MIXTERA_PATH}
 n=0
@@ -110,6 +105,11 @@ if [ $n -ge 5 ]; then
    echo "pip install failed after 5 retries"
    exit 1
 fi
+popd
+
+echo "Installing torchtitan..."
+pushd {TORCHTITAN_PATH}
+pip install -e .
 popd
 
 # Convert TorchTITAN checkpoint to torch format
