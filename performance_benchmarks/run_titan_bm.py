@@ -1,4 +1,5 @@
 from enum import Enum
+import logging
 import shutil
 import threading
 
@@ -18,6 +19,7 @@ import math
 from tqdm import tqdm
 from transformers import AutoTokenizer
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_random_exponential, after_log, before_log
 
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 app = typer.Typer()
@@ -111,7 +113,13 @@ def current_milli_time():
 def load_base_config() -> dict:
     return load_toml_from_file(SCRIPT_DIR / "titan" / "base.toml")
 
-
+@retry( # to handle error 429s
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=1, min=15, max=60),
+    before=before_log(logger, logging.ERROR),
+    after=after_log(logger, logging.ERROR),
+    reraise=True,
+)
 def get_data_from_wandb(project: str, run_id: str, num_steps: int, retry: int = 0) -> dict:
     api = wandb.Api()
     # Retrieve all runs and sort them by creation date in descending order

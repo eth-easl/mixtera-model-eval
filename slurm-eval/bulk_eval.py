@@ -101,6 +101,10 @@ def generate_evaluation_sbatch(
 #SBATCH --environment={CONTAINER_ENVIRONMENT}
 #SBATCH --account={ACCOUNT}
 
+export WORLD_SIZE=1
+export MASTER_ADDR=localhost
+export MASTER_PORT=8080
+
 srun --container-writable bash -c "echo 'Running evaluation for {input_subdir.name}';
 {cmd};
 echo 'Evaluation completed for {input_subdir.name}'"
@@ -228,7 +232,7 @@ def launch_bulk_evaluation(
     ),
     eval_output_dir: Path = typer.Option(..., help="Directory to store evaluation results."),
     tasks: str = typer.Option(
-        "lambada_openai,hellaswag,openbookqa", help="Comma-separated tasks string for evaluation"
+        "lambada,hellaswag,openbookqa,winogrande,arc_easy,arc_challenge,piqa,sciq,logiqa2", help="Comma-separated tasks string for evaluation"
     ),
     fewshots: list[int] = typer.Option([0], help="List of fewshot settings, e.g., 0 1"),
     tokenizer: str = typer.Option("EleutherAI/gpt-neox-20b", help="Tokenizer to use"),
