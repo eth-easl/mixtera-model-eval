@@ -764,7 +764,7 @@ def run_benchmarks(
     fileformats: list[str] = ["jsonl"],  # supported: jsonl, jsonl.zst, parquet, webdatasets
     huggingface_cache_path: Path = Path(f"{SHARED_DIR_DEFAULT}/hfcache"),
     skip_existing: bool = False,
-    account: str | None = None,
+    account: str | None = "a-a09",
     shared_dir: Path = SHARED_DIR_DEFAULT,
     debug_partition: bool = False,
     parallel_slurm_jobs: int = 1,
