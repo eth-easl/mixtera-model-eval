@@ -167,13 +167,13 @@ def submit_and_wait(sbatch_path: Path):
 
 def collect_results(eval_output_dir: Path, merge: bool = True):
     """
-    Collect all JSON outputs from evaluation results stored in directories under eval_output_dir.
-    The function expects each evaluation job to write a JSON file inside a folder named 'results*'.
-    Merges the JSON outputs and creates a CSV (results.csv) in eval_output_dir.
+    Collect all JSON outputs from evaluation results stored anywhere under eval_output_dir.
+    The function expects each evaluation job to write a JSON file (under a 'results' directory).
+    It merges the JSON outputs and creates a CSV (results.csv) in eval_output_dir.
     """
     eval_output_dir = Path(eval_output_dir)
-    # Find all result directories recursively (looking for folders named with a leading "results")
-    json_files = list(eval_output_dir.glob("**/results/*.json"))
+    # Search recursively for JSON files ending in .json
+    json_files = list(eval_output_dir.glob("**/*.json"))
     if not json_files:
         typer.echo(f"No JSON results found in {eval_output_dir}.")
         return
@@ -183,19 +183,26 @@ def collect_results(eval_output_dir: Path, merge: bool = True):
         try:
             with open(json_file, "r") as f:
                 data = json.load(f)
-            # Expecting each JSON has a "results" key.
             if "results" not in data:
                 typer.echo(f"Skipping {json_file}: no 'results' key.")
                 continue
             results = data["results"]
-            # Also, annotate the result with checkpoint id and fewshot state if possible.
-            # We assume the parent folder of the results directory has a name pattern (e.g., step-1000 or fewshot_0).
-            parent_name = json_file.parent.parent.name
-            # Try to extract fewshot number from parent folder name.
-            try:
-                nshot = int(parent_name.split("_")[-1])
-            except Exception:
-                nshot = None
+            # Find the checkpoint id by searching this file's ancestors for one that begins with "step-"
+            checkpoint_id = None
+            for parent in json_file.parents:
+                if parent.name.startswith("step-"):
+                    checkpoint_id = parent.name
+                    break
+            # Also, try to extract the fewshot number from the directory that starts with "fewshot_"
+            fewshot = None
+            for parent in json_file.parents:
+                if parent.name.startswith("fewshot_"):
+                    try:
+                        fewshot = int(parent.name.split("_")[-1])
+                    except Exception:
+                        fewshot = None
+                    break
+
             parsed_results = {}
             for task, metrics in results.items():
                 for key, value in metrics.items():
@@ -203,15 +210,14 @@ def collect_results(eval_output_dir: Path, merge: bool = True):
                         continue
                     new_key = f"{task}_{key}".replace(",", "_")
                     parsed_results[new_key] = value
-            parsed_results["checkpoint_id"] = parent_name
-            parsed_results["nshot"] = nshot
+            parsed_results["checkpoint_id"] = checkpoint_id
+            parsed_results["nshot"] = fewshot
             all_results.append(parsed_results)
         except Exception as e:
             typer.echo(f"Error reading {json_file}: {e}")
             continue
     if all_results:
         df = pd.DataFrame(all_results)
-        # Try to sort by checkpoint and fewshot if possible.
         if "checkpoint_id" in df.columns and "nshot" in df.columns:
             try:
                 df["nshot"] = pd.to_numeric(df["nshot"])
@@ -230,9 +236,12 @@ def launch_bulk_evaluation(
     input_dir: Path = typer.Option(
         ..., help="Input directory containing subdirectories with converted checkpoints (each with an 'hf' folder)"
     ),
-    eval_output_dir: Path = typer.Option(..., help="Directory to store evaluation results."),
+    eval_output_dir: Path = typer.Option(
+        ..., help="Directory to store evaluation results. Must not already exist unless --collect-only is set."
+    ),
     tasks: str = typer.Option(
-        "lambada,hellaswag,openbookqa,winogrande,arc_easy,arc_challenge,piqa,sciq,logiqa2", help="Comma-separated tasks string for evaluation"
+        "lambada,hellaswag,openbookqa,winogrande,arc_easy,arc_challenge,piqa,sciq,logiqa2",
+        help="Comma-separated tasks string for evaluation",
     ),
     fewshots: list[int] = typer.Option([0], help="List of fewshot settings, e.g., 0 1"),
     tokenizer: str = typer.Option("EleutherAI/gpt-neox-20b", help="Tokenizer to use"),
@@ -248,20 +257,28 @@ def launch_bulk_evaluation(
     Launch bulk evaluation jobs based on the input directory.
     If --collect-only is set, evaluation jobs are not launched but the results are collected.
     """
-    eval_output_dir.mkdir(parents=True, exist_ok=True)
+    # If not collect_only, require that eval_output_dir does not exist (to avoid accidental overwriting).
+    eval_output_dir = Path(eval_output_dir)
+    if not collect_only:
+        if eval_output_dir.exists() and any(eval_output_dir.iterdir()):
+            typer.echo(f"Error: Output directory {eval_output_dir} is not empty.")
+            raise typer.Exit(code=1)
+        else:
+            eval_output_dir.mkdir(parents=True, exist_ok=False)
+    else:
+        if not eval_output_dir.exists():
+            typer.echo(f"Error: Output directory {eval_output_dir} does not exist. Cannot collect results.")
+            raise typer.Exit(code=1)
 
     if not collect_only:
-        # Find subdirectories in input_dir that contain an "hf" folder.
         candidate_dirs = [d for d in input_dir.iterdir() if d.is_dir() and (d / "hf").exists()]
         if not candidate_dirs:
             typer.echo("No valid checkpoint directories with an 'hf' subfolder found in the input directory.")
             raise typer.Exit(code=1)
-
         try:
             candidate_dirs.sort(key=lambda p: int(p.name.split("-")[-1]))
         except Exception:
             candidate_dirs.sort(key=lambda p: p.name)
-
         sbatch_files = []
         for subdir in candidate_dirs:
             sbatch_file = generate_evaluation_sbatch(
@@ -269,15 +286,11 @@ def launch_bulk_evaluation(
             )
             sbatch_files.append(sbatch_file)
             typer.echo(f"Created sbatch file for evaluation of {subdir.name} at {sbatch_file}")
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as executor:
             futures = [executor.submit(submit_and_wait, sbatch_file) for sbatch_file in sbatch_files]
             for future in concurrent.futures.as_completed(futures):
                 future.result()
-
         typer.echo("All evaluation jobs have been processed.")
-
-    # Now, whether evaluations were just run or not (collect-only), collect the results.
     typer.echo("Collecting and merging evaluation results...")
     collect_results(eval_output_dir, merge=True)
 
