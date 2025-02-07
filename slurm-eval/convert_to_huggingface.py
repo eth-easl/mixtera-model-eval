@@ -126,10 +126,10 @@ def infer_heads_and_kv(states: Dict[str, torch.Tensor], hidden_size: int) -> Tup
         print(
             f"Warning: Found multiple candidates, using the first one. Please specify the number of heads!\ncandidates = {candidates}"
         )
-    return candidates[0][0]  # returns (n_heads, n_kv_heads)
+    return candidates[0]  # returns (n_heads, n_kv_heads)
 
 
-def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n_kv_heads_override: int = None) -> Dict:
+def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n_kv_heads_override: int = None, n_heads_override: int = None) -> Dict:
     states = state_dict["model"]
     # Infer hidden_size from the token embedding weight (dimensions: vocab_size x hidden_size)
     vocab_size, hidden_size = states["tok_embeddings.weight"].shape
@@ -143,8 +143,8 @@ def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n
     if not layer_indices:
         raise ValueError("No transformer layer keys found in checkpoint!")
     n_layers = max(layer_indices) + 1
-    n_kv_heads = n_kv_heads_override if n_kv_heads_override is not None else infer_heads_and_kv(states, hidden_size)
-
+    n_kv_heads = n_kv_heads_override if n_kv_heads_override is not None else infer_heads_and_kv(states, hidden_size)[1]
+    n_heads = n_heads_override if n_heads_override is not None else infer_heads_and_kv(states, hidden_size)[0]
     # Infer intermediate dimension from one of the feed-forward weights:
     # Expected shape for feed_forward.w1.weight is (intermediate_dim, hidden_size)
     intermediate_dim = states["layers.0.feed_forward.w1.weight"].shape[0]
@@ -152,7 +152,7 @@ def infer_config_from_checkpoint(state_dict: Dict[str, Any], max_seq_len: int, n
     config = {
         "hidden_size": hidden_size,
         "n_layers": n_layers,
-        "n_heads": n_kv_heads,
+        "n_heads": n_heads,
         "n_kv_heads": n_kv_heads,
         "max_seq_len": max_seq_len,
         "vocab_size": vocab_size,
@@ -172,6 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer", type=str, default="EleutherAI/gpt-neox-20b", help="Which tokenizer to use.")
     parser.add_argument("--max_seq_len", type=int, default=2048, help="Maximum sequence length.")
     parser.add_argument("--n_kv_heads", type=int, default=None, help="Override number of key-value heads if provided.")
+    parser.add_argument("--n_heads", type=int, default=None, help="Override number of heads if provided.")
 
     args = parser.parse_args()
 
@@ -181,7 +182,7 @@ if __name__ == "__main__":
     print(f"Loading checkpoint from {checkpoint_path}...")
     state_dict = torch.load(checkpoint_path, map_location=torch.device("cpu"), weights_only=False)
     # Infer configuration parameters, passing max_seq_len and n_kv_heads override if provided.
-    inferred_config = infer_config_from_checkpoint(state_dict, args.max_seq_len, args.n_kv_heads)
+    inferred_config = infer_config_from_checkpoint(state_dict, args.max_seq_len, args.n_kv_heads, args.n_heads)
 
     print("Inferred configuration:")
     for key, value in inferred_config.items():
