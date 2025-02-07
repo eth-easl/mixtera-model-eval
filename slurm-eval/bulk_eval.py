@@ -93,7 +93,7 @@ def generate_evaluation_sbatch(
 #SBATCH --job-name=eval-{input_subdir.name}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=12:00:00
+#SBATCH --time=23:59:00
 #SBATCH --output={logs_out}
 #SBATCH --error={logs_err}
 #SBATCH --partition=normal
