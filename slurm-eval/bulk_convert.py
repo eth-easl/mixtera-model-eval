@@ -54,7 +54,7 @@ def get_no_conda_env():
 
 
 def generate_sbatch_script(
-    checkpoint_path: Path, output_subdir: Path, tokenizer: str, max_seq_len: int, n_kv_heads: int = None, n_heads: int = None
+    checkpoint_path: Path, output_subdir: Path, tokenizer: str, max_seq_len: int, n_kv_heads: int = None, n_heads: int = None, rope_theta: int = None
 ) -> Path:
     """
     Generate an sbatch file that converts a TorchTITAN checkpoint to a Hugging Face checkpoint.
@@ -70,6 +70,7 @@ def generate_sbatch_script(
     # Build the conversion command string.
     n_kv_str = f"--n_kv_heads {n_kv_heads}" if n_kv_heads is not None else ""
     n_head_str = f"--n_heads {n_heads}" if n_heads is not None else ""
+    rope_str = f"--rope_theta {rope_theta}" if rope_theta is not None else ""
 
     script_content = f"""#!/bin/bash
 #SBATCH --job-name=convert-{checkpoint_path.name}
@@ -104,7 +105,7 @@ popd;
 echo 'Converting TorchTITAN checkpoint at {checkpoint_path} to torch format...';
 python -m torch.distributed.checkpoint.format_utils dcp_to_torch {checkpoint_path} {torch_output};
 echo 'Converting torch checkpoint to Hugging Face format...';
-python {CONVERT_SCRIPT_PATH} --input {torch_output} --output {hf_output_dir} --tokenizer {tokenizer} --max_seq_len {max_seq_len} {n_kv_str} {n_head_str};
+python {CONVERT_SCRIPT_PATH} --input {torch_output} --output {hf_output_dir} --tokenizer {tokenizer} --max_seq_len {max_seq_len} {n_kv_str} {n_head_str} {rope_str};
 echo 'Conversion completed for {checkpoint_path.name}'"
 """
     sbatch_path = output_subdir / "run_conversion.slurm"
@@ -180,6 +181,7 @@ def main(
     max_seq_len: int = typer.Option(2048, help="Maximum sequence length for the converted model"),
     n_kv_heads: int = typer.Option(None, help="Override number of key-value heads (optional)"),
     n_heads: int = typer.Option(None, help="Override number of heads (optional)"),
+    rope_theta: int = typer.Option(None, help="Override rope_theta (optional)"),
 ):
     # Check that the output directory exists and is empty; if not, fail early
     if output_dir.exists():
@@ -210,7 +212,7 @@ def main(
             typer.echo(f"Error: Output subdirectory {output_subdir} already exists.")
             raise typer.Exit(code=1)
 
-        sbatch_file = generate_sbatch_script(step_dir, output_subdir, tokenizer, max_seq_len, n_kv_heads, n_heads)
+        sbatch_file = generate_sbatch_script(step_dir, output_subdir, tokenizer, max_seq_len, n_kv_heads, n_heads, rope_theta)
         sbatch_paths.append(sbatch_file)
         typer.echo(f"Created sbatch script for {step_dir.name} at {sbatch_file}")
 
