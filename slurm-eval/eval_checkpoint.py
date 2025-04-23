@@ -155,6 +155,7 @@ def evaluate_checkpoint(
             str(fewshot),
             "--batch_size",
             "auto",
+            "--trust_remote_code",
             "--device",
             "cuda:0",
             "--output_path",
