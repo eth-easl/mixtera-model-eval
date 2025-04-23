@@ -93,7 +93,7 @@ def generate_evaluation_sbatch(
 #SBATCH --job-name=eval-{input_subdir.name}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=23:59:00
+#SBATCH --time=11:59:00
 #SBATCH --output={logs_out}
 #SBATCH --error={logs_err}
 #SBATCH --partition=normal
@@ -240,7 +240,7 @@ def launch_bulk_evaluation(
         ..., help="Directory to store evaluation results. Must not already exist unless --collect-only is set."
     ),
     tasks: str = typer.Option(
-        "lambada,hellaswag,openbookqa,winogrande,arc_easy,arc_challenge,piqa,sciq,logiqa2",
+        "lambada,hellaswag,openbookqa,winogrande,arc_easy,arc_challenge,piqa,sciq,logiqa2,commonsense_qa,pubmed_qa,mmlu,mmlu_pro",
         help="Comma-separated tasks string for evaluation",
     ),
     fewshots: list[int] = typer.Option([0], help="List of fewshot settings, e.g., 0 1"),
