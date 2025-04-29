@@ -221,8 +221,8 @@ def adjust_base_config(
     config["model"]["flavor"] = model.name
 
     # Set number of dp nodes
-    config["training"]["data_parallel_replicate_degree"] = dp
-    config["training"]["data_parallel_shard_degree"] = -1
+    config["parallelism"]["data_parallel_replicate_degree"] = dp
+    config["parallelism"]["data_parallel_shard_degree"] = -1
 
     config["training"]["tokenizer"] = tokenizer
 
@@ -585,7 +585,9 @@ fi
 
 popd
 
-numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' {TORCHTITAN_PATH}/train.py --job.config_file {bm_config_path} --mixtera.ip "{mixtera_ip}" --mixtera.port {mixtera_port}
+cd {TORCHTITAN_PATH}
+
+numactl --membind=0-3 torchrun --nnodes={num_nodes} --nproc_per_node={proc_per_node} --rdzv_backend c10d --rdzv_endpoint '$head_node_ip:29500' -m torchtitan.train --job.config_file {bm_config_path} --mixtera.ip "{mixtera_ip}" --mixtera.port {mixtera_port}
 
 "
 """

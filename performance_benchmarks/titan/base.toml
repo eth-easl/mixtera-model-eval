@@ -28,22 +28,27 @@ name = "AdamW"
 lr = 0.001
 fused = true
 
+[lr_scheduler]
+warmup_steps = 0
+decay_ratio = 0.1
+decay_type = "linear"
+
 [training]
 batch_size = 512
 seq_len = 1024
-warmup_steps = 0
 max_norm = 1.0  # grad norm clipping
 steps = 60000
-data_parallel_replicate_degree = 2
-data_parallel_shard_degree = -1 
-tensor_parallel_degree = 1
 compile = true
 dataset = ""
 seed = 1234
 add_bos = false
 add_eos = true
+tokenizer = "EleutherAI/gpt-neox-20b"
 
-[experimental]
+[parallelism]
+data_parallel_replicate_degree = 2
+data_parallel_shard_degree = -1 
+tensor_parallel_degree = 1
 context_parallel_degree = 1
 pipeline_parallel_degree = 1
 enable_async_tensor_parallel = false
@@ -51,11 +56,11 @@ enable_async_tensor_parallel = false
 [checkpoint]
 enable_checkpoint = false
 folder = "checkpoint"
-interval_type = "steps"
 interval = 9999999
 model_weights_only = false
 export_dtype = "float32"
 async_mode = "disabled"  # ["disabled", "async", "async_with_pinned_mem"]
+keep_latest_k = 0
 
 [activation_checkpoint]
 mode = 'none'  # ['none', 'selective', 'full']
