@@ -227,7 +227,7 @@ def adjust_base_config(
     config["training"]["tokenizer"] = tokenizer
 
     # Set microbatch size
-    config["training"]["batch_size"] = MODEL_MICROBATCH[model]
+    config["training"]["batch_size"] = int(MODEL_MICROBATCH[model] / int(seq_length / 1024))
 
     # Set sequence length
     config["training"]["seq_len"] = seq_length
