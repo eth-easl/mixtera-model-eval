@@ -206,12 +206,13 @@ def adjust_base_config(
     mixtera_chunk_size: int,
     mixtera_chunk_reading_degree_of_parallelism: int,
     fileformat: str,
+    mixtera_pile_mixture: str
 ) -> tuple[dict, dict]:
     config = deepcopy(base_config)
     if "mixtera" not in config:
         config["mixtera"] = {}
 
-    run_name = f"run{curr_run}_dprep{dp}_ngpu{ngpu}_{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}_{mixtera_chunk_size}_{mixtera_chunk_reading_degree_of_parallelism}_{fileformat}"
+    run_name = f"run{curr_run}_dprep{dp}_ngpu{ngpu}_{seed}_w{dl_worker}_s{seq_length}_{model}_{dataloader}_{mixtera_chunk_size}_{mixtera_chunk_reading_degree_of_parallelism}_{fileformat}_{mixtera_pile_mixture}"
     config["metrics"]["wandb_run_name"] = run_name
     config["mixtera"]["job_id"] = run_name
     config["metrics"]["wandb_project"] = bm_identifier
@@ -252,6 +253,7 @@ def adjust_base_config(
         config["training"]["dataloader"] = "mixtera"
         config["mixtera"]["vocab_size"] = vocab_size
         config["mixtera"]["chunk_size"] = mixtera_chunk_size
+        config["mixtera"]["mixtera_pile_mixture"] = mixtera_pile_mixture
         config["mixtera"]["tunnel_via_server"] = False
         config["mixtera"]["chunk_reading_degree_of_parallelism"] = mixtera_chunk_reading_degree_of_parallelism
     elif dataloader == Dataloader.webdatasets:
@@ -783,6 +785,7 @@ def run_benchmarks(
     tokenizer: str = "EleutherAI/gpt-neox-20b",
     mixtera_chunk_sizes: list[int] = [512],
     mixtera_chunk_reading_degree_of_parallelisms: list[int] = [1],
+    mixtera_pile_mixtures: list[str] = ["default"]
 ):
     check_pandas()
 
@@ -867,7 +870,7 @@ def run_benchmarks(
     lock = threading.Lock()
     with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_slurm_jobs) as executor:
         futures = []
-        for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop, fileformat in tqdm(
+        for seed, dl_worker, dp, ngpu, seq_len, dataloader, mix_cs, mix_crdop, fileformat, mix_pile_mix in tqdm(
             list(
                 itertools.product(
                     seeds,
@@ -879,12 +882,13 @@ def run_benchmarks(
                     mixtera_chunk_sizes,
                     mixtera_chunk_reading_degree_of_parallelisms,
                     fileformats,
+                    mixtera_pile_mixtures
                 )
             ),
             desc="Scheduling experiments",
         ):
             if dataloader != Dataloader.mixtera and (
-                mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0]
+                mix_cs != mixtera_chunk_sizes[0] or mix_crdop != mixtera_chunk_reading_degree_of_parallelisms[0] or mix_pile_mix != mixtera_pile_mixtures[0]
             ):
                 continue  # only vary mixtera options for mixtera
 
@@ -906,11 +910,13 @@ def run_benchmarks(
                 mix_cs,
                 mix_crdop,
                 fileformat,
+                mix_pile_mix
             )
             base_results = {
                 "config": adjusted_config,
                 "model": model,
                 "fileformat": fileformat,
+                "mixtera_pile_mixture": mix_pile_mix,
                 "dataset_path": str(dataset_path),
             } | additional_info
 
