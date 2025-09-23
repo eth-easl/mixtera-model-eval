@@ -253,7 +253,7 @@ def adjust_base_config(
         config["training"]["dataloader"] = "mixtera"
         config["mixtera"]["vocab_size"] = vocab_size
         config["mixtera"]["chunk_size"] = mixtera_chunk_size
-        config["mixtera"]["pile_mixture"] = mixtera_pile_mixture
+        config["mixtera"]["pile"] = mixtera_pile_mixture
         config["mixtera"]["tunnel_via_server"] = False
         config["mixtera"]["chunk_reading_degree_of_parallelism"] = mixtera_chunk_reading_degree_of_parallelism
     elif dataloader == Dataloader.webdatasets:
